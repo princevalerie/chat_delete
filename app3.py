@@ -155,7 +155,7 @@ def main():
                         
                         st.session_state.messages.append({
                             "role": "assistant",
-                            "content": str(response)
+                            "content": response
                         })
                     
                     except Exception as e:
