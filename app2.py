@@ -78,7 +78,7 @@ def initialize_database(credentials):
 
         with engine.connect() as conn:
             llm = ChatGroq(
-                model_name="llama-3.3-70b-versatile",
+                model_name="deepseek-r1-distill-llama-70b",
                 api_key=credentials["GROQ_API_KEY"],
                 temperature=0.2
             )
