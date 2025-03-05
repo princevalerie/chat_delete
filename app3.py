@@ -93,20 +93,62 @@ def validate_and_connect_database(user, password, host, port, db, groq_api_key):
         return None, None, None
 
 def render_response(response):
-    """Render response with improved flexibility"""
+    """
+    Render response with comprehensive handling of different output types
+    Supports multiple output types from PandasAI
+    """
     try:
-        if isinstance(response, pd.DataFrame):
+        # Handle various possible output types
+        if response is None:
+            st.warning("No response generated.")
+            return
+
+        # Check if it's a file path (for saved plots or files)
+        if isinstance(response, str):
+            # Check file extension
+            if response.lower().endswith(('.png', '.jpg', '.jpeg', '.gif', '.svg')):
+                st.image(response)
+            elif response.lower().endswith(('.csv', '.xlsx')):
+                st.download_button(
+                    label="Download File", 
+                    data=open(response, 'rb').read(), 
+                    file_name=os.path.basename(response)
+                )
+            else:
+                st.write(response)
+        
+        # Pandas DataFrame
+        elif isinstance(response, pd.DataFrame):
             st.dataframe(response)
+        
+        # Matplotlib Figure
         elif isinstance(response, plt.Figure):
             st.pyplot(response)
+        
+        # Plotly Figure
         elif isinstance(response, go.Figure):
             st.plotly_chart(response)
-        elif isinstance(response, str):
+        
+        # List or Dict
+        elif isinstance(response, (list, dict)):
             st.write(response)
+        
+        # Numeric or Boolean values
+        elif isinstance(response, (int, float, bool)):
+            st.write(str(response))
+        
+        # Default fallback
         else:
-            st.write("Result:", response)
+            try:
+                # Attempt to convert to string if possible
+                st.write(str(response))
+            except Exception as conversion_error:
+                st.error(f"Unable to render response. Type: {type(response)}")
+                st.error(f"Error details: {conversion_error}")
+    
     except Exception as e:
-        st.error(f"Error rendering response: {e}")
+        st.error(f"Unexpected error rendering response: {e}")
+        st.error(f"Response type: {type(response)}")
         st.write("Raw response:", response)
 
 def main():
