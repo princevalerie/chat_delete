@@ -83,7 +83,8 @@ def validate_and_connect_database(credentials):
                     st.warning(f"Gagal memuat data dari public.{table}: {e}")
 
             # Buat SmartDatalake dari list SmartDataframe
-            datalake = SmartDatalake(sdf_list, config={"llm": llm, "response_parser": StreamlitResponse(st)})
+            # datalake = SmartDatalake(sdf_list, config={"llm": llm, "response_parser": StreamlitResponse})
+            datalake = SmartDatalake(sdf_list, config={"llm": llm, "response_parser": StreamlitResponse})
             return datalake, table_info, engine
 
     except Exception as e:
