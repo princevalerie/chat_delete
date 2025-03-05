@@ -1,3 +1,4 @@
+import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.graph_objs as go
@@ -6,7 +7,7 @@ from langchain_groq import ChatGroq
 from pandasai import SmartDataframe, SmartDatalake
 
 def validate_and_connect_database(credentials):
-    """Validasi koneksi ke database dan inisialisasi komponen-komponennya."""
+    """Validate database connection and initialize everything"""
     try:
         # Ekstrak kredensial
         db_user = credentials["DB_USER"]
@@ -26,7 +27,7 @@ def validate_and_connect_database(credentials):
         
         # Uji koneksi dan inisialisasi komponen
         with engine.connect() as connection:
-            # Inisialisasi LLM menggunakan ChatGroq
+            # Inisialisasi LLM
             llm = ChatGroq(model_name="Llama3-8b-8192", api_key=groq_api_key)
             
             # Inspeksi database
@@ -56,7 +57,7 @@ def validate_and_connect_database(credentials):
                     }
                     
                 except Exception as e:
-                    print(f"Warning: Gagal memuat data dari public.{table}: {e}")
+                    st.warning(f"Gagal memuat data dari public.{table}: {e}")
             
             # Buat SmartDatalake dari list SmartDataframe
             datalake = SmartDatalake(sdf_list, config={"llm": llm})
@@ -64,60 +65,103 @@ def validate_and_connect_database(credentials):
             return datalake, table_info, engine
     
     except Exception as e:
-        print(f"Error: Database connection error: {e}")
+        st.error(f"Database connection error: {e}")
         return None, None, None
 
-def main():
-    print("=== Smart Database Explorer ===")
-    print("Masukkan kredensial database Anda.\n")
-    
-    db_user = input("PostgreSQL Username: ")
-    db_password = input("PostgreSQL Password: ")
-    db_host = input("PostgreSQL Host [default: localhost]: ") or "localhost"
-    db_port = input("PostgreSQL Port [default: 5432]: ") or "5432"
-    db_name = input("Database Name: ")
-    groq_api_key = input("Groq API Key: ")
-    
-    credentials = {
-        "DB_USER": db_user,
-        "DB_PASSWORD": db_password,
-        "DB_HOST": db_host,
-        "DB_PORT": db_port,
-        "DB_NAME": db_name,
-        "GROQ_API_KEY": groq_api_key
-    }
-    
-    print("\nMenghubungkan ke database dan memuat tabel...")
+# Menggunakan caching bawaan Streamlit untuk menyimpan resource
+@st.cache_resource(show_spinner=False)
+def get_datalake(credentials):
     datalake, table_info, engine = validate_and_connect_database(credentials)
+    return datalake, table_info
+
+def main():
+    st.set_page_config(page_title="Smart Database Explorer", layout="wide")
+    st.title("🔍 Smart Database Explorer")
     
-    if datalake and table_info:
-        print("\nKoneksi berhasil! Berikut adalah tabel yang telah dimuat:\n")
-        for table, info in table_info.items():
-            print(f"Table: {table}")
-            print(f"  Columns  : {', '.join(info['columns'])}")
-            print(f"  Row Count: {info['row_count']}")
-            print("-" * 40)
-    else:
-        print("Gagal terhubung ke database.")
-        return
-    
-    print("\n=== Chat Interface ===")
-    print("Ketik 'exit' untuk keluar.\n")
-    
-    while True:
-        prompt = input("Your question about the data: ")
-        if prompt.lower() in ["exit", "quit"]:
-            print("Exiting chat. Goodbye!")
-            break
+    # Sidebar untuk kredensial database
+    with st.sidebar:
+        st.header("🔐 Database Credentials")
         
-        try:
-            response = datalake.chat(prompt)
-            # Tampilkan response secara langsung
-            print("\nResponse:")
-            print(response)
-            print("-" * 40)
-        except Exception as e:
-            print(f"Error dalam memproses chat: {e}")
+        db_user = st.text_input("PostgreSQL Username", key="db_user")
+        db_password = st.text_input("PostgreSQL Password", type="password", key="db_password")
+        db_host = st.text_input("PostgreSQL Host", value="localhost", key="db_host")
+        db_port = st.text_input("PostgreSQL Port", value="5432", key="db_port")
+        db_name = st.text_input("Database Name", key="db_name")
+        groq_api_key = st.text_input("Groq API Key", type="password", key="groq_api_key")
+        
+        connect_button = st.button("Connect to Database")
     
+    # Logika koneksi database
+    if connect_button and all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
+        credentials = {
+            "DB_USER": db_user,
+            "DB_PASSWORD": db_password,
+            "DB_HOST": db_host,
+            "DB_PORT": db_port,
+            "DB_NAME": db_name,
+            "GROQ_API_KEY": groq_api_key
+        }
+        
+        with st.spinner("Menghubungkan ke database dan memuat tabel..."):
+            datalake, table_info = get_datalake(credentials)
+        
+        if datalake and table_info:
+            st.session_state.datalake = datalake
+            st.session_state.table_info = table_info
+            st.session_state.database_loaded = True
+    
+    # Tampilan antarmuka chat
+    if st.session_state.get('database_loaded', False):
+        st.header("💬 Database Chat")
+        
+        # Inisialisasi history chat
+        if 'messages' not in st.session_state:
+            st.session_state.messages = []
+        
+        # Tampilkan informasi tabel yang telah dimuat
+        st.subheader("📊 Loaded Tables")
+        for table, info in st.session_state.table_info.items():
+            with st.expander(table):
+                st.write(f"Columns: {', '.join(info['columns'])}")
+                st.write(f"Row Count: {info['row_count']}")
+        
+        # Tampilkan history chat
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"], avatar="🤖" if message["role"] == "assistant" else "👤"):
+                st.markdown(message["content"])
+        
+        # Input chat
+        if prompt := st.chat_input("Ask a question about your data"):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user", avatar="👤"):
+                st.markdown(prompt)
+            
+            # Generate response dari datalake
+            with st.chat_message("assistant", avatar="🤖"):
+                with st.spinner("Generating response..."):
+                    try:
+                        response = st.session_state.datalake.chat(prompt)
+                        # Render response secara langsung
+                        if response is None:
+                            st.warning("Tidak ada response yang dihasilkan.")
+                        elif isinstance(response, (pd.DataFrame, dict, list, int, float, bool)):
+                            st.write(response)
+                        elif isinstance(response, plt.Figure):
+                            st.pyplot(response)
+                        elif isinstance(response, go.Figure):
+                            st.plotly_chart(response)
+                        else:
+                            st.markdown(response)
+                        
+                        st.session_state.messages.append({
+                            "role": "assistant",
+                            "content": str(response)
+                        })
+                    
+                    except Exception as e:
+                        st.error(f"Error dalam memproses chat: {e}")
+                        import traceback
+                        st.error(traceback.format_exc())
+
 if __name__ == "__main__":
     main()
