@@ -19,18 +19,23 @@ from pandasai.responses.response_parser import ResponseParser
 class StreamlitResponse(ResponseParser):
     def __init__(self, context) -> None:
         super().__init__(context)
+        self.image_response = None
+        self.text_response = None
 
     def format_dataframe(self, result):
+        self.text_response = result["value"].to_string()
         st.dataframe(result["value"])
-        return
+        return result["value"]
 
     def format_plot(self, result):
+        self.image_response = result["value"]
         st.image(result["value"])
-        return
+        return result["value"]
 
     def format_other(self, result):
+        self.text_response = str(result["value"])
         st.write(result["value"])
-        return
+        return result["value"]
 
 # -----------------------------------------------------------------------------
 # Fungsi validasi koneksi database dan pemuatan tabel
@@ -71,8 +76,9 @@ def validate_and_connect_database(credentials):
                 try:
                     df = pd.read_sql_query(query, engine)
                     # Buat SmartDataframe dengan konfigurasi LLM dan ResponseParser
-                    sdf = SmartDataframe(df, name=f"public.{table}")
-                    sdf.config = {"llm": llm, "response_parser": StreamlitResponse(st)}
+                    response_parser = StreamlitResponse(st)
+                    sdf = SmartDataframe(df, name=f"public.{table}", 
+                                          config={"llm": llm, "response_parser": response_parser})
                     sdf_list.append(sdf)
                     # Simpan metadata tabel
                     table_info[table] = {
@@ -83,7 +89,6 @@ def validate_and_connect_database(credentials):
                     st.warning(f"Gagal memuat data dari public.{table}: {e}")
 
             # Buat SmartDatalake dari list SmartDataframe
-            # datalake = SmartDatalake(sdf_list, config={"llm": llm, "response_parser": StreamlitResponse})
             datalake = SmartDatalake(sdf_list, config={"llm": llm, "response_parser": StreamlitResponse})
             return datalake, table_info, engine
 
@@ -117,10 +122,18 @@ def load_database_cache(credentials, cache_path="db_cache.pkl"):
 # -----------------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="Smart Database Explorer", layout="wide")
-    st.title("🔍 Smart Database Explorer")
+    
+    # Inisialisasi session state
+    if 'database_loaded' not in st.session_state:
+        st.session_state.database_loaded = False
+    if 'messages' not in st.session_state:
+        st.session_state.messages = []
 
-    # Sidebar untuk kredensial database
-    with st.sidebar:
+    # Layout dengan sidebar dan main content
+    col1, col2 = st.columns([1, 3])
+
+    with col1:
+        # Sidebar untuk kredensial database
         st.header("🔐 Database Credentials")
         db_user = st.text_input("PostgreSQL Username", key="db_user")
         db_password = st.text_input("PostgreSQL Password", type="password", key="db_password")
@@ -130,51 +143,90 @@ def main():
         groq_api_key = st.text_input("Groq API Key", type="password", key="groq_api_key")
         connect_button = st.button("Connect to Database")
 
-    if connect_button and all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
-        credentials = {
-            "DB_USER": db_user,
-            "DB_PASSWORD": db_password,
-            "DB_HOST": db_host,
-            "DB_PORT": db_port,
-            "DB_NAME": db_name,
-            "GROQ_API_KEY": groq_api_key
-        }
-        with st.spinner("Menghubungkan ke database dan memuat tabel..."):
-            datalake, table_info = load_database_cache(credentials)
+        # Tampilkan tabel yang dimuat
+        if st.session_state.database_loaded:
+            st.header("📊 Loaded Tables")
+            for table, info in st.session_state.table_info.items():
+                with st.expander(table):
+                    st.write(f"Columns: {', '.join(info['columns'])}")
+                    st.write(f"Row Count: {info['row_count']}")
 
-        if datalake and table_info:
-            st.session_state.datalake = datalake
-            st.session_state.table_info = table_info
-            st.session_state.database_loaded = True
+    with col2:
+        st.title("🔍 Smart Database Explorer")
 
-    if st.session_state.get("database_loaded", False):
-        st.header("💬 Database Chat")
-        if "messages" not in st.session_state:
-            st.session_state.messages = []
+        # Proses koneksi database
+        if connect_button and all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
+            credentials = {
+                "DB_USER": db_user,
+                "DB_PASSWORD": db_password,
+                "DB_HOST": db_host,
+                "DB_PORT": db_port,
+                "DB_NAME": db_name,
+                "GROQ_API_KEY": groq_api_key
+            }
+            with st.spinner("Menghubungkan ke database dan memuat tabel..."):
+                datalake, table_info = load_database_cache(credentials)
 
-        st.subheader("📊 Loaded Tables")
-        for table, info in st.session_state.table_info.items():
-            with st.expander(table):
-                st.write(f"Columns: {', '.join(info['columns'])}")
-                st.write(f"Row Count: {info['row_count']}")
+            if datalake and table_info:
+                st.session_state.datalake = datalake
+                st.session_state.table_info = table_info
+                st.session_state.database_loaded = True
+                st.success("Database connected successfully!")
 
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"], avatar="🤖" if message["role"] == "assistant" else "👤"):
-                st.markdown(message["content"])
+        # Chat interface
+        if st.session_state.get("database_loaded", False):
+            st.header("💬 Database Chat")
 
-        if prompt := st.chat_input("Ask a question about your data"):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user", avatar="👤"):
-                st.markdown(prompt)
-            with st.spinner("Generating response..."):
-                try:
-                    # Hasil chat akan di-render langsung oleh StreamlitResponse
-                    answer = st.session_state.datalake.chat(prompt)
-                    # Jika answer berupa string, Anda dapat menyimpannya ke history (opsional)
-                    if answer:
-                        st.session_state.messages.append({"role": "assistant", "content": answer})
-                except Exception as e:
-                    st.error(f"Error dalam memproses chat: {e}")
+            # Tampilkan riwayat pesan
+            for message in st.session_state.messages:
+                with st.chat_message(message["role"], 
+                                     avatar="🤖" if message["role"] == "assistant" else "👤"):
+                    # Tangani berbagai jenis output
+                    if "image" in message:
+                        st.image(message["image"])
+                    if "text" in message:
+                        st.markdown(message["text"])
+
+            # Input chat
+            if prompt := st.chat_input("Ask a question about your data"):
+                # Tambahkan pesan pengguna
+                st.session_state.messages.append({
+                    "role": "user", 
+                    "text": prompt
+                })
+
+                # Tampilkan pesan pengguna
+                with st.chat_message("user", avatar="👤"):
+                    st.markdown(prompt)
+
+                # Siapkan response parser khusus
+                response_parser = StreamlitResponse(st)
+
+                # Proses chat dengan datalake
+                with st.chat_message("assistant", avatar="🤖"):
+                    with st.spinner("Generating response..."):
+                        try:
+                            # Jalankan chat dan dapatkan respons
+                            answer = st.session_state.datalake.chat(prompt)
+
+                            # Tambahkan respons ke daftar pesan
+                            message_entry = {"role": "assistant"}
+
+                            # Tangani respons gambar
+                            if response_parser.image_response is not None:
+                                message_entry["image"] = response_parser.image_response
+                                st.image(response_parser.image_response)
+
+                            # Tangani respons teks
+                            if response_parser.text_response is not None:
+                                message_entry["text"] = response_parser.text_response
+                                st.markdown(response_parser.text_response)
+
+                            # Tambahkan ke riwayat pesan
+                            st.session_state.messages.append(message_entry)
+
+                        except Exception as e:
+                            st.error(f"Error dalam memproses chat: {e}")
 
 if __name__ == "__main__":
     main()
