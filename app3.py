@@ -83,8 +83,8 @@ def validate_and_connect_database(user, password, host, port, db, groq_api_key):
                 except Exception as e:
                     st.warning(f"Failed to load data from public.{table}: {e}")
             
-            # Create SmartDatalake
-            datalake = SmartDatalake(sdf_list, name="Database", config={"llm": llm})
+            # Create SmartDatalake with only config parameter
+            datalake = SmartDatalake(sdf_list, config={"llm": llm})
             
             return datalake, table_info, engine
     
