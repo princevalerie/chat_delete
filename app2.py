@@ -13,11 +13,178 @@ from pandasai import SmartDataframe, SmartDatalake
 from pandasai.llm import OpenAI
 from pandasai.responses.response_parser import ResponseParser
 
-# [Previous code for StreamlitResponse remains the same]
+# -----------------------------------------------------------------------------
+# Custom Response Parser untuk Streamlit
+# -----------------------------------------------------------------------------
+class StreamlitResponse(ResponseParser):
+    def __init__(self, context) -> None:
+        super().__init__(context)
+        self.image_response = None
+        self.text_response = None
+        self.dataframe_response = None
 
+    def format_dataframe(self, result):
+        self.dataframe_response = result["value"]
+        st.dataframe(result["value"])
+        return result["value"]
+
+    def format_plot(self, result):
+        self.image_response = result["value"]
+        st.image(result["value"])
+        return result["value"]
+
+    def format_other(self, result):
+        self.text_response = str(result["value"])
+        st.write(result["value"])
+        return result["value"]
+
+# -----------------------------------------------------------------------------
+# Fungsi Penanganan Respons PandasAI
+# -----------------------------------------------------------------------------
+def handle_pandasai_response(response, response_parser):
+    """
+    Comprehensive handler for PandasAI responses
+    
+    Args:
+        response: Raw response from PandasAI
+        response_parser: Custom Streamlit response parser
+    
+    Returns:
+        dict: Parsed message entry with different response types
+    """
+    message_entry = {"role": "assistant"}
+    
+    # Debugging: Print raw response type
+    st.write(f"Response Type: {type(response)}")
+    
+    # Handle different response types
+    if response is None:
+        message_entry["text"] = "No response generated."
+        st.write("No response generated.")
+    
+    # 1. Dataframe Handling
+    elif isinstance(response, pd.DataFrame):
+        message_entry["dataframe"] = response
+        st.dataframe(response)
+    
+    # 2. Dataframe from Response Parser
+    elif response_parser.dataframe_response is not None:
+        message_entry["dataframe"] = response_parser.dataframe_response
+        st.dataframe(response_parser.dataframe_response)
+    
+    # 3. Image/Plot Handling
+    elif response_parser.image_response is not None:
+        message_entry["image"] = response_parser.image_response
+        st.image(response_parser.image_response)
+    
+    # 4. Text/String Handling
+    elif isinstance(response, str):
+        message_entry["text"] = response
+        st.markdown(response)
+    elif response_parser.text_response is not None:
+        message_entry["text"] = response_parser.text_response
+        st.markdown(response_parser.text_response)
+    
+    # 5. Numeric/Scalar Value Handling
+    elif isinstance(response, (int, float, bool)):
+        message_entry["text"] = str(response)
+        st.write(response)
+    
+    # 6. List Handling
+    elif isinstance(response, list):
+        message_entry["text"] = "\n".join(map(str, response))
+        st.write(response)
+    
+    # 7. Dictionary Handling
+    elif isinstance(response, dict):
+        formatted_dict = "\n".join([f"**{k}**: {v}" for k, v in response.items()])
+        message_entry["text"] = formatted_dict
+        st.write(formatted_dict)
+    
+    # 8. Catch-all for unexpected types
+    else:
+        message_entry["text"] = f"Unhandled response type: {type(response)}"
+        st.write(f"Unhandled response type: {type(response)}")
+    
+    return message_entry
+
+# -----------------------------------------------------------------------------
+# Fungsi validasi koneksi database dan pemuatan tabel
+# -----------------------------------------------------------------------------
 def validate_and_connect_database(credentials):
-    # [Previous implementation remains the same]
+    try:
+        # Ekstrak kredensial
+        db_user = credentials["DB_USER"]
+        db_password = credentials["DB_PASSWORD"]
+        db_host = credentials["DB_HOST"]
+        db_port = credentials["DB_PORT"]
+        db_name = credentials["DB_NAME"]
+        groq_api_key = credentials["GROQ_API_KEY"]
 
+        # Encode password untuk karakter spesial
+        encoded_password = db_password.replace('@', '%40')
+
+        # Buat database engine
+        engine = create_engine(
+            f"postgresql://{db_user}:{encoded_password}@{db_host}:{db_port}/{db_name}"
+        )
+
+        with engine.connect() as connection:
+            # Inisialisasi LLM
+            llm = ChatGroq(model_name="llama-3.3-70b-versatile", api_key=groq_api_key)
+
+            # Inspeksi database
+            inspector = inspect(engine)
+            tables = inspector.get_table_names(schema="public")
+            views = inspector.get_view_names(schema="public")
+            all_tables_views = tables + views
+
+            sdf_list = []
+            table_info = {}
+            permission_errors = []
+
+            for table in all_tables_views:
+                try:
+                    # Coba mendapatkan sample data dengan batasan
+                    query = f'SELECT * FROM "public"."{table}" LIMIT 10'
+                    df = pd.read_sql_query(query, engine)
+                    
+                    # Buat SmartDataframe dengan konfigurasi LLM dan ResponseParser
+                    response_parser = StreamlitResponse(st)
+                    sdf = SmartDataframe(df, name=f"public.{table}", 
+                                          config={"llm": llm, "response_parser": response_parser})
+                    sdf_list.append(sdf)
+                    
+                    # Simpan metadata tabel
+                    table_info[table] = {
+                        "columns": list(df.columns),
+                        "row_count": len(df),
+                        "sample_loaded": True
+                    }
+                except sqlalchemy.exc.SQLAlchemyError as e:
+                    permission_errors.append({
+                        "table": table,
+                        "error": str(e)
+                    })
+                    table_info[table] = {
+                        "columns": [],
+                        "row_count": 0,
+                        "sample_loaded": False,
+                        "error": str(e)
+                    }
+
+            # Buat SmartDatalake dari list SmartDataframe
+            datalake = SmartDatalake(sdf_list, config={"llm": llm, "response_parser": StreamlitResponse})
+            
+            return datalake, table_info, engine, permission_errors
+
+    except Exception as e:
+        st.error(f"Database connection error: {e}")
+        return None, None, None, []
+
+# -----------------------------------------------------------------------------
+# Tampilan Utama dan Logika Chat Database
+# -----------------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="Smart Database Explorer", layout="wide")
     
