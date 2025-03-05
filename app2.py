@@ -115,7 +115,7 @@ def initialize_database(credentials):
             
             for table in all_tables:
                 try:
-                    df = pd.read_sql_query(f'SELECT * FROM "public"."{table}" LIMIT 10', engine)
+                    df = pd.read_sql_query(f'SELECT * FROM "public"."{table}"', engine)
                     sdf = SmartDataframe(
                         df,
                         name=f"public.{table}",
