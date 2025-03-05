@@ -1,4 +1,3 @@
-import os
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -8,34 +7,28 @@ from langchain_groq import ChatGroq
 from pandasai import SmartDataframe, SmartDatalake
 import joblib
 
-def auto_validate_and_connect_database():
-    """Automatically validate and connect to database using environment variables"""
+def validate_and_connect_database(credentials):
+    """Validate database connection and initialize everything"""
     try:
-        # Retrieve credentials from environment variables or Streamlit secrets
-        db_user = st.secrets.get("DB_USER", os.getenv("DB_USER"))
-        db_password = st.secrets.get("DB_PASSWORD", os.getenv("DB_PASSWORD"))
-        db_host = st.secrets.get("DB_HOST", os.getenv("DB_HOST", "localhost"))
-        db_port = st.secrets.get("DB_PORT", os.getenv("DB_PORT", "5432"))
-        db_name = st.secrets.get("DB_NAME", os.getenv("DB_NAME"))
-        groq_api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
-        
-        # Validate credentials
-        if not all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
-            st.error("Missing database or API credentials. Please set environment variables or Streamlit secrets.")
-            return None, None, None
+        # Extract credentials
+        db_user = credentials["DB_USER"]
+        db_password = credentials["DB_PASSWORD"]
+        db_host = credentials["DB_HOST"]
+        db_port = credentials["DB_PORT"]
+        db_name = credentials["DB_NAME"]
+        groq_api_key = credentials["GROQ_API_KEY"]
         
         # URL encode special characters in password
         encoded_password = db_password.replace('@', '%40')
         
         # Create database engine
         engine = create_engine(
-            f"postgresql://{db_user}:{encoded_password}@{db_host}:{port}/{db_name}"
+            f"postgresql://{db_user}:{encoded_password}@{db_host}:{db_port}/{db_name}"
         )
         
         # Test connection
         with engine.connect() as connection:
             # Initialize LLM
-            os.environ["GROQ_API_KEY"] = groq_api_key
             llm = ChatGroq(model_name="Llama3-8b-8192", api_key=groq_api_key)
             
             # Inspect database
@@ -70,12 +63,6 @@ def auto_validate_and_connect_database():
             # Create SmartDatalake
             datalake = SmartDatalake(sdf_list, config={"llm": llm})
             
-            # Save datalake cache
-            joblib.dump({
-                'datalake': datalake,
-                'table_info': table_info
-            }, 'datalake_cache.joblib')
-            
             return datalake, table_info, engine
     
     except Exception as e:
@@ -83,6 +70,7 @@ def auto_validate_and_connect_database():
         return None, None, None
 
 def render_response(response):
+    """Comprehensive response rendering with plot support"""
     try:
         if response is None:
             st.warning("No response generated.")
@@ -109,23 +97,49 @@ def main():
     st.set_page_config(page_title="Smart Database Explorer", layout="wide")
     st.title("🔍 Smart Database Explorer")
     
-    # Automatically load database on startup
-    if 'datalake' not in st.session_state:
+    # Sidebar for credentials
+    with st.sidebar:
+        st.header("🔐 Database Credentials")
+        
+        # Database credentials inputs
+        db_user = st.text_input("PostgreSQL Username", key="db_user")
+        db_password = st.text_input("PostgreSQL Password", type="password", key="db_password")
+        db_host = st.text_input("PostgreSQL Host", value="localhost", key="db_host")
+        db_port = st.text_input("PostgreSQL Port", value="5432", key="db_port")
+        db_name = st.text_input("Database Name", key="db_name")
+        
+        # Groq API Key
+        groq_api_key = st.text_input("Groq API Key", type="password", key="groq_api_key")
+        
+        # Connect Button
+        connect_button = st.button("Connect to Database")
+    
+    # Connection Logic
+    if connect_button and all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
+        credentials = {
+            "DB_USER": db_user,
+            "DB_PASSWORD": db_password,
+            "DB_HOST": db_host,
+            "DB_PORT": db_port,
+            "DB_NAME": db_name,
+            "GROQ_API_KEY": groq_api_key
+        }
+        
         with st.spinner("Connecting to database and loading tables..."):
-            datalake, table_info, _ = auto_validate_and_connect_database()
+            # Attempt to connect and load database
+            datalake, table_info, engine = validate_and_connect_database(credentials)
         
         if datalake and table_info:
+            # Save to cache
+            joblib.dump({
+                'datalake': datalake,
+                'table_info': table_info
+            }, 'datalake_cache.joblib')
+            
+            # Store in session state
             st.session_state.datalake = datalake
             st.session_state.table_info = table_info
             st.session_state.database_loaded = True
-    
-    # Display table information
-    if st.session_state.get('database_loaded', False):
-        st.subheader("📊 Loaded Tables")
-        for table, info in st.session_state.table_info.items():
-            with st.expander(table):
-                st.write(f"Columns: {', '.join(info['columns'])}")
-                st.write(f"Row Count: {info['row_count']}")
     
     # Chat interface
     if st.session_state.get('database_loaded', False):
@@ -134,6 +148,13 @@ def main():
         # Initialize chat history
         if 'messages' not in st.session_state:
             st.session_state.messages = []
+        
+        # Display table information
+        st.subheader("📊 Loaded Tables")
+        for table, info in st.session_state.table_info.items():
+            with st.expander(table):
+                st.write(f"Columns: {', '.join(info['columns'])}")
+                st.write(f"Row Count: {info['row_count']}")
         
         # Display chat messages
         for message in st.session_state.messages:
