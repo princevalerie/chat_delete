@@ -1,4 +1,5 @@
-
+import os
+from PIL import Image
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -141,6 +142,7 @@ def main():
             with st.spinner("Generating response..."):
                 try:
                     response = st.session_state.datalake.chat(prompt)
+                    
                     # Render response secara langsung
                     if response is None:
                         st.warning("Tidak ada response yang dihasilkan.")
@@ -150,11 +152,17 @@ def main():
                         st.pyplot(response)
                     elif isinstance(response, go.Figure):
                         st.plotly_chart(response)
+                    # Jika response berupa path file gambar (.png) dan file tersebut ada, tampilkan gambarnya
+                    elif isinstance(response, str) and response.endswith(".png") and os.path.exists(response):
+                        image = Image.open(response)
+                        st.image(image)
                     else:
                         st.markdown(response)
                     
-                    # Jika response berupa plot, simpan sebagai string agar tidak terjadi error ketika menyimpan objek non-string
-                    if isinstance(response, (plt.Figure, go.Figure)):
+                    # Logika penyimpanan response:
+                    # Jika response berupa plot atau path gambar, simpan sebagai string agar tidak terjadi error ketika menyimpan objek non-string
+                    if (isinstance(response, (plt.Figure, go.Figure)) or
+                        (isinstance(response, str) and response.endswith(".png") and os.path.exists(response))):
                         saved_content = "Plot output saved"
                     else:
                         saved_content = response
@@ -166,7 +174,6 @@ def main():
                     
                 except Exception as e:
                     st.error(f"Error dalam memproses chat: {e}")
-
 
 if __name__ == "__main__":
     main()
