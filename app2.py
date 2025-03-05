@@ -136,9 +136,9 @@ def validate_and_connect_database(credentials):
         with engine.connect() as connection:
             # Initialize LLM with explicit temperature setting
             llm = ChatGroq(
-                model_name="llama-3.3-70b-versatile", 
+                model_name="llama-3.3-70b-specdec", 
                 api_key=groq_api_key,
-                temperature=0.2  # Add low temperature for more deterministic results
+                temperature=0.1  # Add low temperature for more deterministic results
             )
 
             # Inspect database
