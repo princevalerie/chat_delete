@@ -8,36 +8,28 @@ from langchain_groq import ChatGroq
 from pandasai import SmartDataframe, SmartDatalake
 import joblib
 
-def save_datalake(datalake, table_info, filename='datalake_cache.joblib'):
-    """Save datalake and table info to a file"""
+def auto_validate_and_connect_database():
+    """Automatically validate and connect to database using environment variables"""
     try:
-        joblib.dump({
-            'datalake': datalake,
-            'table_info': table_info
-        }, filename)
-        st.success(f"Database cache saved to {filename}")
-    except Exception as e:
-        st.error(f"Error saving datalake cache: {e}")
-
-def load_datalake(filename='datalake_cache.joblib'):
-    """Load datalake and table info from a file"""
-    try:
-        cached_data = joblib.load(filename)
-        st.success("Database cache loaded successfully")
-        return cached_data['datalake'], cached_data['table_info']
-    except Exception as e:
-        st.error(f"Error loading datalake cache: {e}")
-        return None, None
-
-def validate_and_connect_database(user, password, host, port, db, groq_api_key):
-    """Validate database connection and initialize everything in one step"""
-    try:
+        # Retrieve credentials from environment variables or Streamlit secrets
+        db_user = st.secrets.get("DB_USER", os.getenv("DB_USER"))
+        db_password = st.secrets.get("DB_PASSWORD", os.getenv("DB_PASSWORD"))
+        db_host = st.secrets.get("DB_HOST", os.getenv("DB_HOST", "localhost"))
+        db_port = st.secrets.get("DB_PORT", os.getenv("DB_PORT", "5432"))
+        db_name = st.secrets.get("DB_NAME", os.getenv("DB_NAME"))
+        groq_api_key = st.secrets.get("GROQ_API_KEY", os.getenv("GROQ_API_KEY"))
+        
+        # Validate credentials
+        if not all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
+            st.error("Missing database or API credentials. Please set environment variables or Streamlit secrets.")
+            return None, None, None
+        
         # URL encode special characters in password
-        encoded_password = password.replace('@', '%40')
+        encoded_password = db_password.replace('@', '%40')
         
         # Create database engine
         engine = create_engine(
-            f"postgresql://{user}:{encoded_password}@{host}:{port}/{db}"
+            f"postgresql://{db_user}:{encoded_password}@{db_host}:{port}/{db_name}"
         )
         
         # Test connection
@@ -56,18 +48,10 @@ def validate_and_connect_database(user, password, host, port, db, groq_api_key):
             sdf_list = []
             table_info = {}
             
-            # Enhanced debugging and loading
-            st.subheader("🔍 Table Column Information")
             for table in all_tables_views:
                 query = f'SELECT * FROM "public"."{table}"'
                 try:
                     df = pd.read_sql_query(query, engine)
-                    
-                    # Detailed column information
-                    st.write(f"Table: {table}")
-                    st.write("Columns:", list(df.columns))
-                    st.write("Sample Data:")
-                    st.dataframe(df.head())
                     
                     # Create SmartDataframe
                     sdf = SmartDataframe(df, name=f"public.{table}")
@@ -86,6 +70,12 @@ def validate_and_connect_database(user, password, host, port, db, groq_api_key):
             # Create SmartDatalake
             datalake = SmartDatalake(sdf_list, config={"llm": llm})
             
+            # Save datalake cache
+            joblib.dump({
+                'datalake': datalake,
+                'table_info': table_info
+            }, 'datalake_cache.joblib')
+            
             return datalake, table_info, engine
     
     except Exception as e:
@@ -93,33 +83,21 @@ def validate_and_connect_database(user, password, host, port, db, groq_api_key):
         return None, None, None
 
 def render_response(response):
-    """Comprehensive response rendering with plot support"""
     try:
-        # Existing type checks
         if response is None:
             st.warning("No response generated.")
             return
 
-        # Handle Matplotlib Plots
         if isinstance(response, plt.Figure):
             st.pyplot(response)
-        
-        # Handle Plotly Plots
         elif isinstance(response, go.Figure):
             st.plotly_chart(response)
-        
-        # Handle DataFrame (which might contain plot method)
         elif isinstance(response, pd.DataFrame):
             st.dataframe(response)
-        
-        # Handle string responses
         elif isinstance(response, str):
             st.write(response)
-        
-        # Handle other types of responses
         elif isinstance(response, (list, dict, int, float, bool)):
             st.write(str(response))
-        
         else:
             st.write("Unhandled response type:", str(response))
     
@@ -131,51 +109,23 @@ def main():
     st.set_page_config(page_title="Smart Database Explorer", layout="wide")
     st.title("🔍 Smart Database Explorer")
     
-    # Sidebar for credentials
-    with st.sidebar:
-        st.header("🔐 Database Credentials")
-        
-        # Database credentials inputs
-        db_user = st.text_input("PostgreSQL Username", key="db_user")
-        db_password = st.text_input("PostgreSQL Password", type="password", key="db_password")
-        db_host = st.text_input("PostgreSQL Host", value="localhost", key="db_host")
-        db_port = st.text_input("PostgreSQL Port", value="5432", key="db_port")
-        db_name = st.text_input("Database Name", key="db_name")
-        
-        # Groq API Key
-        groq_api_key = st.text_input("Groq API Key", type="password", key="groq_api_key")
-        
-        # Buttons
-        col1, col2 = st.columns(2)
-        with col1:
-            connect_button = st.button("Connect to Database")
-        with col2:
-            load_cache_button = st.button("Load Cached Database")
-    
-    # Connection Logic
-    if connect_button and all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
+    # Automatically load database on startup
+    if 'datalake' not in st.session_state:
         with st.spinner("Connecting to database and loading tables..."):
-            # Attempt to connect and load database
-            datalake, table_info, engine = validate_and_connect_database(
-                db_user, db_password, db_host, db_port, db_name, groq_api_key
-            )
+            datalake, table_info, _ = auto_validate_and_connect_database()
         
         if datalake and table_info:
-            # Save to cache
-            save_datalake(datalake, table_info)
-            
-            # Store in session state
             st.session_state.datalake = datalake
             st.session_state.table_info = table_info
             st.session_state.database_loaded = True
     
-    # Load Cached Database
-    if load_cache_button:
-        cached_datalake, cached_table_info = load_datalake()
-        if cached_datalake and cached_table_info:
-            st.session_state.datalake = cached_datalake
-            st.session_state.table_info = cached_table_info
-            st.session_state.database_loaded = True
+    # Display table information
+    if st.session_state.get('database_loaded', False):
+        st.subheader("📊 Loaded Tables")
+        for table, info in st.session_state.table_info.items():
+            with st.expander(table):
+                st.write(f"Columns: {', '.join(info['columns'])}")
+                st.write(f"Row Count: {info['row_count']}")
     
     # Chat interface
     if st.session_state.get('database_loaded', False):
@@ -184,13 +134,6 @@ def main():
         # Initialize chat history
         if 'messages' not in st.session_state:
             st.session_state.messages = []
-        
-        # Display table information
-        st.subheader("📊 Loaded Tables")
-        for table, info in st.session_state.table_info.items():
-            with st.expander(table):
-                st.write(f"Columns: {', '.join(info['columns'])}")
-                st.write(f"Row Count: {info['row_count']}")
         
         # Display chat messages
         for message in st.session_state.messages:
@@ -210,8 +153,6 @@ def main():
             with st.chat_message("assistant", avatar="🤖"):
                 with st.spinner("Generating response..."):
                     try:
-                        # Enhanced debugging
-                        st.write("Debug - Attempting to chat with datalake")
                         response = st.session_state.datalake.chat(prompt)
                         
                         # Render and display response
@@ -225,7 +166,6 @@ def main():
                     
                     except Exception as e:
                         st.error(f"Detailed error in chat processing: {e}")
-                        # Log full error traceback
                         import traceback
                         st.error(traceback.format_exc())
 
