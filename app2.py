@@ -158,7 +158,7 @@ def main():
         for table, info in st.session_state.table_info.items():
             with st.expander(f"Table: {table}"):
                 if info.get('sample_loaded'):
-                    st.write(f"Columns: {', '.join(info['columns']}")
+                    st.write(f"Columns: {', '.join(info['columns'])}")  # Perbaikan di sini
                     st.write(f"Sample rows: {info['row_count']}")
                 else:
                     st.error(f"Failed to load table: {info.get('error', 'Unknown error')}")
