@@ -41,81 +41,78 @@ def set_page_style():
     </style>
     """, unsafe_allow_html=True)
 
-def validate_credentials(user, password, host, port, db):
-    """Validate database connection credentials"""
+def validate_and_connect_database(user, password, host, port, db, groq_api_key):
+    """Validate database connection and initialize everything in one step"""
     try:
+        # Create database engine
         engine = create_engine(
             f"postgresql://{user}:{password.replace('@', '%40')}@{host}:{port}/{db}"
         )
+        
+        # Test connection
         with engine.connect() as connection:
-            return True
-    except Exception as e:
-        st.error(f"Connection failed: {e}")
-        return False
-
-def load_database_tables(user, password, host, port, db, schema='public'):
-    """Load tables from PostgreSQL database into SmartDataframes"""
-    try:
-        engine = create_engine(
-            f"postgresql://{user}:{password.replace('@', '%40')}@{host}:{port}/{db}"
-        )
-        
-        inspector = inspect(engine)
-        tables = inspector.get_table_names(schema=schema)
-        views = inspector.get_view_names(schema=schema)
-        all_tables_views = tables + views
-        
-        sdf_list = []
-        table_info = {}
-        
-        for table in all_tables_views:
-            query = f'SELECT * FROM "{schema}"."{table}"'
-            try:
-                df = pd.read_sql_query(query, engine)
-                sdf = SmartDataframe(df, name=f"{schema}.{table}")
-                sdf_list.append(sdf)
-                
-                # Store table metadata
-                table_info[table] = {
-                    'columns': list(df.columns),
-                    'row_count': len(df)
-                }
-                
-            except Exception as e:
-                st.warning(f"Gagal memuat data dari {schema}.{table}: {e}")
-        
-        return sdf_list, table_info
+            # Initialize LLM
+            os.environ["GROQ_API_KEY"] = groq_api_key
+            llm = ChatGroq(model_name="Llama3-8b-8192", api_key=groq_api_key)
+            
+            # Inspect database
+            inspector = inspect(engine)
+            tables = inspector.get_table_names(schema='public')
+            views = inspector.get_view_names(schema='public')
+            all_tables_views = tables + views
+            
+            # Load tables
+            sdf_list = []
+            table_info = {}
+            
+            for table in all_tables_views:
+                query = f'SELECT * FROM "public"."{table}"'
+                try:
+                    df = pd.read_sql_query(query, engine)
+                    sdf = SmartDataframe(df, name=f"public.{table}")
+                    sdf.config = {"llm": llm}  # Configure LLM for each dataframe
+                    sdf_list.append(sdf)
+                    
+                    # Store table metadata
+                    table_info[table] = {
+                        'columns': list(df.columns),
+                        'row_count': len(df)
+                    }
+                    
+                except Exception as e:
+                    st.warning(f"Gagal memuat data dari public.{table}: {e}")
+            
+            # Create SmartDatalake
+            datalake = SmartDatalake(sdf_list)
+            
+            return datalake, table_info
     
     except Exception as e:
-        st.error(f"Database loading error: {e}")
-        return [], {}
-
-def initialize_llm(api_key):
-    """Initialize Groq LLM"""
-    try:
-        os.environ["GROQ_API_KEY"] = api_key
-        llm = ChatGroq(model_name="Llama3-8b-8192", api_key=api_key)
-        return llm
-    except Exception as e:
-        st.error(f"LLM initialization error: {e}")
-        return None
+        st.error(f"Database connection error: {e}")
+        return None, None
 
 def render_response(response):
-    """Render response based on its type"""
-    if isinstance(response, pd.DataFrame):
-        st.dataframe(response)
-    elif isinstance(response, (go.Figure, plt.Figure)):
-        st.pyplot(response) if isinstance(response, plt.Figure) else st.plotly_chart(response)
-    elif isinstance(response, str):
-        st.markdown(response)
-    else:
-        st.write(response)
+    """Render response with improved flexibility"""
+    try:
+        if isinstance(response, pd.DataFrame):
+            st.dataframe(response)
+        elif isinstance(response, plt.Figure):
+            st.pyplot(response)
+        elif isinstance(response, go.Figure):
+            st.plotly_chart(response)
+        elif isinstance(response, str):
+            st.write(response)
+        else:
+            st.write("Result:", response)
+    except Exception as e:
+        st.error(f"Error rendering response: {e}")
+        st.write("Raw response:", response)
 
 def main():
     set_page_style()
     st.title("🔍 Smart Database Explorer")
     
-    # Sidebar for credentials
+    # Sidebar for credentials with auto-connection
     with st.sidebar:
         st.header("🔐 Database Credentials")
         
@@ -128,42 +125,26 @@ def main():
         
         # Groq API Key
         groq_api_key = st.text_input("Groq API Key", type="password")
-        
-        # Connect button
-        connect_button = st.button("Connect to Database")
     
-    # Database connection and table loading
-    if connect_button:
-        if validate_credentials(db_user, db_password, db_host, db_port, db_name):
-            # Initialize LLM
-            llm = initialize_llm(groq_api_key)
+    # Auto connect and load when all credentials are filled
+    if all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
+        with st.spinner("Connecting to database and loading tables..."):
+            # Attempt to connect and load database
+            datalake, table_info = validate_and_connect_database(
+                db_user, db_password, db_host, db_port, db_name, groq_api_key
+            )
+        
+        if datalake and table_info:
+            # Store in session state
+            st.session_state.datalake = datalake
+            st.session_state.table_info = table_info
             
-            if llm:
-                # Load database tables
-                with st.spinner("Loading tables..."):
-                    sdf_list, table_info = load_database_tables(
-                        db_user, db_password, db_host, db_port, db_name
-                    )
-                
-                if sdf_list:
-                    # Configure SmartDataframes with LLM
-                    for sdf in sdf_list:
-                        sdf.config = {"llm": llm}
-                    
-                    # Create SmartDatalake
-                    datalake = SmartDatalake(sdf_list)
-                    
-                    # Store in session state
-                    st.session_state.datalake = datalake
-                    st.session_state.table_info = table_info
-                    st.success("Database connected and tables loaded successfully!")
-                    
-                    # Display table information
-                    st.subheader("Loaded Tables")
-                    for table, info in table_info.items():
-                        with st.expander(table):
-                            st.write(f"Columns: {', '.join(info['columns'])}")
-                            st.write(f"Row Count: {info['row_count']}")
+            # Display table information
+            st.subheader("📊 Loaded Tables")
+            for table, info in table_info.items():
+                with st.expander(table):
+                    st.write(f"Columns: {', '.join(info['columns'])}")
+                    st.write(f"Row Count: {info['row_count']}")
     
     # Chat interface
     if 'datalake' in st.session_state:
