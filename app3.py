@@ -19,11 +19,12 @@ from pandasai.responses.response_parser import ResponseParser
 # =============================================================================
 class StreamlitCallback(BaseCallback):
     def __init__(self, container) -> None:
-        """Inisialisasi callback handler."""
+        """Initialize callback handler."""
         self.container = container
 
     def on_code(self, response: str):
         self.container.code(response)
+
 
 class StreamlitResponse(ResponseParser):
     def __init__(self, context) -> None:
@@ -34,20 +35,12 @@ class StreamlitResponse(ResponseParser):
         return
 
     def format_plot(self, result):
-        # Render plot berdasarkan tipe objek
-        if isinstance(result["value"], plt.Figure):
-            st.pyplot(result["value"])
-        elif isinstance(result["value"], go.Figure):
-            st.plotly_chart(result["value"])
-        elif isinstance(result["value"], str) and result["value"].endswith(".png") and os.path.exists(result["value"]):
-            image = Image.open(result["value"])
-            st.image(image)
+        st.image(result["value"])
         return
 
     def format_other(self, result):
         st.write(result["value"])
         return
-
 # =============================================================================
 # Fungsi untuk validasi koneksi database dan memuat tabel
 # =============================================================================
