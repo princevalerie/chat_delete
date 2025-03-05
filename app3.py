@@ -10,7 +10,7 @@ from langchain_community.llms import Ollama
 # Add timeout for database connections
 TIMEOUT = 10  # seconds
 
-st.set_page_config(layout="wide", page_title="Database Explorer")  # PANGGILAN YANG BENAR (HANYA SEKALI)
+st.set_page_config(layout="wide", page_title="Database Explorer")  # Panggilan yang benar (hanya sekali)
 
 def fetch_tables(connector):
     """
@@ -103,7 +103,7 @@ def main():
                 "host": st.text_input("Host", "localhost"),
                 "port": st.number_input("Port", value=3306),
                 "database": st.text_input("Database"),
-                "username": st.text_input("Username"),
+                "user": st.text_input("Username"),  # Perbaikan: "user" bukan "username"
                 "password": st.text_input("Password", type="password")
             }
         else:
@@ -111,7 +111,7 @@ def main():
                 "host": st.text_input("Host", "localhost"),
                 "port": st.number_input("Port", value=5432),
                 "database": st.text_input("Database"),
-                "username": st.text_input("Username"),
+                "user": st.text_input("Username"),  # Perbaikan: "user" bukan "username"
                 "password": st.text_input("Password", type="password")
             }
 
