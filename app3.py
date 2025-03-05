@@ -125,7 +125,7 @@ def main():
                 "host": st.text_input("Host", "localhost"),
                 "port": st.number_input("Port", value=5432),
                 "database": st.text_input("Database"),
-                "user": st.text_input("Username"),  # Corrected: "user" instead of "username"
+                "username": st.text_input("Username"),  # Corrected: "username" instead of "user"
                 "password": st.text_input("Password", type="password")
             }
 
