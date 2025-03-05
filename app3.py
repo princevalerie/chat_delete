@@ -39,6 +39,24 @@ def set_page_style():
     </style>
     """, unsafe_allow_html=True)
 
+def debug_table_columns(engine, table_name):
+    """
+    Retrieve and display table column information
+    """
+    try:
+        # Query to get column information
+        query = f"""
+        SELECT column_name, data_type 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+        AND table_name = '{table_name}';
+        """
+        columns_df = pd.read_sql_query(query, engine)
+        return columns_df
+    except Exception as e:
+        st.error(f"Error retrieving columns for {table_name}: {e}")
+        return None
+
 def validate_and_connect_database(user, password, host, port, db, groq_api_key):
     """Validate database connection and initialize everything in one step"""
     try:
@@ -66,7 +84,14 @@ def validate_and_connect_database(user, password, host, port, db, groq_api_key):
             sdf_list = []
             table_info = {}
             
+            # Debugging section to display all table columns
+            st.subheader("🔍 Table Column Information")
             for table in all_tables_views:
+                columns_df = debug_table_columns(engine, table)
+                if columns_df is not None:
+                    with st.expander(f"Columns in {table}"):
+                        st.dataframe(columns_df)
+                
                 query = f'SELECT * FROM "public"."{table}"'
                 try:
                     df = pd.read_sql_query(query, engine)
@@ -91,6 +116,7 @@ def validate_and_connect_database(user, password, host, port, db, groq_api_key):
     except Exception as e:
         st.error(f"Database connection error: {e}")
         return None, None, None
+
 
 def render_response(response):
     """
