@@ -55,7 +55,7 @@ def validate_and_connect_database(credentials):
 
         with engine.connect() as connection:
             # Inisialisasi LLM
-            llm = ChatGroq(model_name="Llama3-8b-8192", api_key=groq_api_key)
+            llm = ChatGroq(model_name="llama-3.3-70b-versatile", api_key=groq_api_key)
 
             # Inspeksi database
             inspector = inspect(engine)
