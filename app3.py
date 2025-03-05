@@ -93,25 +93,33 @@ def validate_and_connect_database(user, password, host, port, db, groq_api_key):
         return None, None, None
 
 def render_response(response):
-    """Comprehensive response rendering with enhanced debugging"""
+    """Comprehensive response rendering with plot support"""
     try:
-        # Extensive debugging output
-        st.write("Debug - Response Type:", type(response))
-        st.write("Debug - Response Content:", str(response)[:500])  # First 500 chars
-        
-        # Detailed rendering logic
+        # Existing type checks
         if response is None:
             st.warning("No response generated.")
             return
 
-        if isinstance(response, pd.DataFrame):
+        # Handle Matplotlib Plots
+        if isinstance(response, plt.Figure):
+            st.pyplot(response)
+        
+        # Handle Plotly Plots
+        elif isinstance(response, go.Figure):
+            st.plotly_chart(response)
+        
+        # Handle DataFrame (which might contain plot method)
+        elif isinstance(response, pd.DataFrame):
             st.dataframe(response)
+        
+        # Handle string responses
         elif isinstance(response, str):
             st.write(response)
-        elif isinstance(response, (list, dict)):
-            st.write(response)
-        elif isinstance(response, (int, float, bool)):
+        
+        # Handle other types of responses
+        elif isinstance(response, (list, dict, int, float, bool)):
             st.write(str(response))
+        
         else:
             st.write("Unhandled response type:", str(response))
     
