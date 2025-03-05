@@ -18,9 +18,12 @@ logger = logging.getLogger(__name__)
 # Custom Streamlit Response Parser
 # -----------------------------------------------------------------------------
 class StreamlitResponse(ResponseParser):
-    def __init__(self):
-        super().__init__()
+    def __init__(self, context=None):
+        if context is None:
+            context = {}  # Or set a meaningful default context if required
+        super().__init__(context)
         self.plot_counter = 0
+
 
     def format_dataframe(self, result):
         """Handle dataframe output"""
