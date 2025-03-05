@@ -167,11 +167,11 @@ def main():
                 st.markdown(prompt)
             with st.spinner("Generating response..."):
                 try:
-                    st.session_state.datalake.chat(prompt)
-                    st.session_state.messages.append({
-                        "role": "assistant",
-                        "content": "Output telah dirender pada tampilan."
-                    })
+                    # Hasil chat akan di-render langsung oleh StreamlitResponse
+                    answer = st.session_state.datalake.chat(prompt)
+                    # Jika ada hasil teks, simpan ke history chat (opsional)
+                    if answer:
+                        st.session_state.messages.append({"role": "assistant", "content": answer})
                 except Exception as e:
                     st.error(f"Error dalam memproses chat: {e}")
 
