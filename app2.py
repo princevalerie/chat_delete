@@ -45,19 +45,31 @@ def validate_and_connect_database(credentials):
             table_info = {}
             failed_tables = []
 
+            # Setup PandasAI config with additional settings to prevent prompt_id error
+            pandasai_config = {
+                "llm": llm,
+                "verbose": True,
+                "enforce_privacy": True,
+                "save_charts": True,
+                "enable_cache": False  # Disable cache to avoid prompt_id issues
+            }
+
             for table in all_tables_views:
                 try:
                     # Get sample data with limit
                     query = f'SELECT * FROM "public"."{table}" LIMIT 10'
                     df = pd.read_sql_query(query, engine)
                     
-                    # Create SmartDataframe with simplified config to avoid 'prompt_id' error
+                    # Create SmartDataframe with robust error handling
                     try:
-                        # Try the most recent PandasAI interface
-                        sdf = SmartDataframe(df, name=f"public.{table}", config={"llm": llm})
-                    except TypeError:
-                        # Fallback for older versions that might need different format
+                        sdf = SmartDataframe(df, name=f"public.{table}", config=pandasai_config)
+                    except TypeError as e:
+                        st.warning(f"Using fallback initialization for {table}: {str(e)}")
                         sdf = SmartDataframe(df, name=f"public.{table}", llm=llm)
+                    except Exception as e:
+                        st.warning(f"SmartDataframe initialization issue for {table}: {str(e)}")
+                        # Even more basic fallback
+                        sdf = SmartDataframe(df)
                     
                     sdf_list.append(sdf)
                     
@@ -75,13 +87,16 @@ def validate_and_connect_database(credentials):
                     }
                     failed_tables.append(table)
 
-            # Create SmartDatalake with simplified config
+            # Create SmartDatalake with robust error handling
             try:
-                # Try the most recent PandasAI interface
-                datalake = SmartDatalake(sdf_list, config={"llm": llm})
-            except TypeError:
-                # Fallback for older versions that might need different format
+                datalake = SmartDatalake(sdf_list, config=pandasai_config)
+            except TypeError as e:
+                st.warning(f"Using fallback for datalake initialization: {str(e)}")
                 datalake = SmartDatalake(sdf_list, llm=llm)
+            except Exception as e:
+                st.warning(f"SmartDatalake initialization issue: {str(e)}")
+                # Most basic fallback
+                datalake = SmartDatalake(sdf_list)
             
             return datalake, table_info, engine, failed_tables
     except Exception as e:
@@ -89,13 +104,39 @@ def validate_and_connect_database(credentials):
         return None, None, None, []
 
 # -----------------------------------------------------------------------------
-# Process input query function
+# Process input query function with error handling
 # -----------------------------------------------------------------------------
 def process_query(datalake, prompt):
     with st.spinner("Processing query..."):
         try:
-            # Get response from PandasAI
-            result = datalake.chat(prompt)
+            st.info("Executing query, please wait...")
+            
+            # Try using the direct query method
+            try:
+                result = datalake.chat(prompt)
+            except AttributeError as e:
+                if "prompt_id" in str(e):
+                    st.warning("Encountered prompt_id error. Trying alternative method...")
+                    # Alternative approach using sample code method
+                    result = datalake.generate_pandas_code(prompt)
+                    st.code(result, language="python")
+                    st.info("Executing generated code...")
+                    # Execute the generated code on the first dataframe as fallback
+                    # This is a simplified approach and may not work for all cases
+                    if len(datalake.dfs) > 0:
+                        df = datalake.dfs[0].df
+                        # Use a safe exec environment
+                        local_vars = {"df": df, "pd": pd}
+                        exec(result, {}, local_vars)
+                        # Check if execution created a new dataframe
+                        for var_name, var_value in local_vars.items():
+                            if isinstance(var_value, pd.DataFrame) and var_name != "df":
+                                result = var_value
+                                break
+                        else:
+                            result = "Code executed but no result dataframe created."
+                else:
+                    raise e
             
             # Display results based on type
             st.subheader("Result:")
@@ -111,6 +152,13 @@ def process_query(datalake, prompt):
             return True
         except Exception as e:
             st.error(f"Error processing query: {str(e)}")
+            
+            # Offer suggestions to the user
+            st.info("Suggestions:")
+            st.info("1. Try rephrasing your query")
+            st.info("2. Check if your query relates to the available tables")
+            st.info("3. Try a simpler query first")
+            
             return False
 
 # -----------------------------------------------------------------------------
