@@ -8,7 +8,7 @@ sqlalchemy
 psycopg2-binary
 
 # Machine Learning and AI
-pandasai==0.6.1
+pandasai==1.4.10
 langchain-groq
 openai
 
