@@ -24,8 +24,16 @@ class StreamlitResponse(ResponseParser):
         return result["value"]
 
     def format_plot(self, result):
-        self.image_response = result["value"]
-        st.image(result["value"])
+        try:
+            # Store image path instead of direct object to avoid serialization issues
+            if isinstance(result["value"], str) and os.path.exists(result["value"]):
+                self.image_response = result["value"]
+                st.image(result["value"])
+            else:
+                self.image_response = result["value"]
+                st.image(result["value"])
+        except Exception as e:
+            st.error(f"Error displaying plot: {e}")
         return result["value"]
 
     def format_other(self, result):
@@ -49,43 +57,62 @@ def handle_pandasai_response(response, response_parser):
     """
     message_entry = {"role": "assistant"}
     
-    # Handle different response types
-    if response is None:
-        message_entry["text"] = "No response generated."
+    try:
+        # Handle different response types
+        if response is None:
+            message_entry["text"] = "No response generated."
+            st.write("No response generated.")
+        
+        # 1. Dataframe Handling
+        elif isinstance(response, pd.DataFrame):
+            message_entry["dataframe"] = response
+            st.dataframe(response)
+        
+        # 2. Dataframe from Response Parser
+        elif response_parser.dataframe_response is not None:
+            message_entry["dataframe"] = response_parser.dataframe_response
+            st.dataframe(response_parser.dataframe_response)
+        
+        # 3. Image/Plot Handling
+        elif response_parser.image_response is not None:
+            message_entry["image"] = response_parser.image_response
+            # Image already displayed in format_plot
+        
+        # 4. Text/String Handling
+        elif isinstance(response, str):
+            message_entry["text"] = response
+            st.markdown(response)
+        elif response_parser.text_response is not None:
+            message_entry["text"] = response_parser.text_response
+            st.markdown(response_parser.text_response)
+        
+        # 5. Numeric/Scalar Value Handling
+        elif isinstance(response, (int, float, bool)):
+            message_entry["text"] = str(response)
+            st.write(response)
+        
+        # 6. List Handling
+        elif isinstance(response, list):
+            message_entry["text"] = "\n".join(map(str, response))
+            st.write(response)
+        
+        # 7. Dictionary Handling
+        elif isinstance(response, dict):
+            formatted_dict = "\n".join([f"**{k}**: {v}" for k, v in response.items()])
+            message_entry["text"] = formatted_dict
+            st.write(formatted_dict)
+        
+        # 8. Catch-all for unexpected types
+        else:
+            message_entry["text"] = f"Unhandled response type: {type(response)}"
+            st.write(f"Unhandled response type: {type(response)}")
     
-    # 1. Dataframe Handling
-    elif isinstance(response, pd.DataFrame):
-        message_entry["dataframe"] = response
+    except Exception as e:
+        message_entry["text"] = f"Error processing response: {str(e)}"
+        st.error(f"Error processing response: {str(e)}")
     
-    # 2. Dataframe from Response Parser
-    elif response_parser.dataframe_response is not None:
-        message_entry["dataframe"] = response_parser.dataframe_response
-    
-    # 3. Image/Plot Handling
-    elif response_parser.image_response is not None:
-        message_entry["image"] = response_parser.image_response
-    
-    # 4. Text/String Handling
-    elif isinstance(response, str):
-        message_entry["text"] = response
-    elif response_parser.text_response is not None:
-        message_entry["text"] = response_parser.text_response
-    
-    # 5. Numeric/Scalar Value Handling
-    elif isinstance(response, (int, float, bool)):
-        message_entry["text"] = str(response)
-    
-    # 6. List Handling
-    elif isinstance(response, list):
-        message_entry["text"] = "\n".join(map(str, response))
-    
-    # 7. Dictionary Handling
-    elif isinstance(response, dict):
-        message_entry["text"] = "\n".join([f"**{k}**: {v}" for k, v in response.items()])
-    
-    # 8. Catch-all for unexpected types
-    else:
-        message_entry["text"] = f"Unhandled response type: {type(response)}"
+    # Force Streamlit to update immediately
+    st.experimental_rerun()
     
     return message_entry
 
@@ -110,8 +137,12 @@ def validate_and_connect_database(credentials):
 
     try:
         with engine.connect() as connection:
-            # Initialize LLM
-            llm = ChatGroq(model_name="llama-3.3-70b-versatile", api_key=groq_api_key)
+            # Initialize LLM with explicit temperature setting
+            llm = ChatGroq(
+                model_name="llama-3.3-70b-versatile", 
+                api_key=groq_api_key,
+                temperature=0.2  # Add low temperature for more deterministic results
+            )
 
             # Inspect database
             inspector = inspect(engine)
@@ -134,7 +165,13 @@ def validate_and_connect_database(credentials):
                     sdf = SmartDataframe(
                         df, 
                         name=f"public.{table}", 
-                        config={"llm": llm, "response_parser": response_parser}
+                        config={
+                            "llm": llm, 
+                            "response_parser": response_parser,
+                            "save_charts": True,  # Ensure charts are saved
+                            "enforce_panel_edit": False,  # Prevent Panel editing which can cause issues
+                            "open_charts": False  # Don't try to open charts automatically
+                        }
                     )
                     sdf_list.append(sdf)
                     
@@ -151,10 +188,16 @@ def validate_and_connect_database(credentials):
                     }
                     failed_tables.append(table)
 
-            # Create SmartDatalake from SmartDataframe list
+            # Create SmartDatalake from SmartDataframe list with explicit configs
             datalake = SmartDatalake(
                 sdf_list, 
-                config={"llm": llm, "response_parser": StreamlitResponse}
+                config={
+                    "llm": llm, 
+                    "response_parser": StreamlitResponse(st),
+                    "save_charts": True,
+                    "enforce_panel_edit": False,
+                    "open_charts": False
+                }
             )
             
             return datalake, table_info, engine, failed_tables
@@ -173,6 +216,8 @@ def main():
         st.session_state.database_loaded = False
     if 'messages' not in st.session_state:
         st.session_state.messages = []
+    if 'processing_query' not in st.session_state:
+        st.session_state.processing_query = False
 
     # Sidebar for Database Credentials
     with st.sidebar:
@@ -245,44 +290,76 @@ def main():
         for message in st.session_state.messages:
             with st.chat_message(message["role"], 
                              avatar="🤖" if message["role"] == "assistant" else "👤"):
-                if "image" in message:
-                    st.image(message["image"])
-                if "text" in message:
+                if "image" in message and message["image"] is not None:
+                    try:
+                        st.image(message["image"])
+                    except Exception as e:
+                        st.error(f"Failed to display image: {e}")
+                if "text" in message and message["text"] is not None:
                     st.markdown(message["text"])
-                if "dataframe" in message:
+                if "dataframe" in message and message["dataframe"] is not None:
                     st.dataframe(message["dataframe"])
 
-        # Chat input
-        if prompt := st.chat_input("Ask a question about your data"):
-            st.session_state.messages.append({
-                "role": "user", 
-                "text": prompt
-            })
-
-            with st.chat_message("user", avatar="👤"):
-                st.markdown(prompt)
-
-            response_parser = StreamlitResponse(st)
-
+        # Process any pending query first before accepting a new one
+        if st.session_state.get("pending_query"):
+            prompt = st.session_state.pending_query
+            st.session_state.pending_query = None  # Clear pending query
+            
             with st.chat_message("assistant", avatar="🤖"):
                 with st.spinner("Generating response..."):
                     try:
+                        response_parser = StreamlitResponse(st)
                         response_parser.image_response = None
                         response_parser.text_response = None
                         response_parser.dataframe_response = None
 
                         answer = st.session_state.datalake.chat(prompt)
-
-                        message_entry = handle_pandasai_response(answer, response_parser)
+                        
+                        message_entry = {
+                            "role": "assistant",
+                            "text": response_parser.text_response,
+                            "image": response_parser.image_response,
+                            "dataframe": response_parser.dataframe_response
+                        }
+                        
+                        # Remove None values
+                        message_entry = {k: v for k, v in message_entry.items() if v is not None}
+                        
+                        if not any(k in message_entry for k in ["text", "image", "dataframe"]):
+                            if isinstance(answer, str):
+                                message_entry["text"] = answer
+                            elif isinstance(answer, pd.DataFrame):
+                                message_entry["dataframe"] = answer
+                            else:
+                                message_entry["text"] = str(answer)
                         
                         st.session_state.messages.append(message_entry)
 
                     except Exception as e:
-                        st.error(f"Error processing chat: {e}")
+                        error_msg = f"Error processing chat: {str(e)}"
+                        st.error(error_msg)
                         st.session_state.messages.append({
                             "role": "assistant",
-                            "text": f"Error processing your request: {str(e)}"
+                            "text": error_msg
                         })
+            
+            st.experimental_rerun()
+
+        # Chat input
+        if prompt := st.chat_input("Ask a question about your data"):
+            # Add user message to history
+            st.session_state.messages.append({
+                "role": "user", 
+                "text": prompt
+            })
+            
+            # Display user message immediately
+            with st.chat_message("user", avatar="👤"):
+                st.markdown(prompt)
+            
+            # Queue the prompt for processing
+            st.session_state.pending_query = prompt
+            st.experimental_rerun()
 
 if __name__ == "__main__":
     main()
