@@ -2,12 +2,10 @@ import os
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
+import plotly.graph_objs as go
 from sqlalchemy import create_engine, inspect
 from langchain_groq import ChatGroq
 from pandasai import SmartDataframe, SmartDatalake
-import plotly.express as px
-import plotly.graph_objs as go
 
 def set_page_style():
     """Set custom page style"""
@@ -44,9 +42,12 @@ def set_page_style():
 def validate_and_connect_database(user, password, host, port, db, groq_api_key):
     """Validate database connection and initialize everything in one step"""
     try:
+        # URL encode special characters in password
+        encoded_password = password.replace('@', '%40')
+        
         # Create database engine
         engine = create_engine(
-            f"postgresql://{user}:{password.replace('@', '%40')}@{host}:{port}/{db}"
+            f"postgresql://{user}:{encoded_password}@{host}:{port}/{db}"
         )
         
         # Test connection
@@ -80,16 +81,16 @@ def validate_and_connect_database(user, password, host, port, db, groq_api_key):
                     }
                     
                 except Exception as e:
-                    st.warning(f"Gagal memuat data dari public.{table}: {e}")
+                    st.warning(f"Failed to load data from public.{table}: {e}")
             
             # Create SmartDatalake
-            datalake = SmartDatalake(sdf_list)
+            datalake = SmartDatalake(sdf_list, name="Database", config={"llm": llm})
             
-            return datalake, table_info
+            return datalake, table_info, engine
     
     except Exception as e:
         st.error(f"Database connection error: {e}")
-        return None, None
+        return None, None, None
 
 def render_response(response):
     """Render response with improved flexibility"""
@@ -112,25 +113,32 @@ def main():
     set_page_style()
     st.title("🔍 Smart Database Explorer")
     
-    # Sidebar for credentials with auto-connection
+    # Initialize session state variables if not exists
+    if 'database_loaded' not in st.session_state:
+        st.session_state.database_loaded = False
+    
+    # Sidebar for credentials
     with st.sidebar:
         st.header("🔐 Database Credentials")
         
         # Database credentials inputs
-        db_user = st.text_input("PostgreSQL Username")
-        db_password = st.text_input("PostgreSQL Password", type="password")
-        db_host = st.text_input("PostgreSQL Host", value="localhost")
-        db_port = st.text_input("PostgreSQL Port", value="5432")
-        db_name = st.text_input("Database Name")
+        db_user = st.text_input("PostgreSQL Username", key="db_user")
+        db_password = st.text_input("PostgreSQL Password", type="password", key="db_password")
+        db_host = st.text_input("PostgreSQL Host", value="localhost", key="db_host")
+        db_port = st.text_input("PostgreSQL Port", value="5432", key="db_port")
+        db_name = st.text_input("Database Name", key="db_name")
         
         # Groq API Key
-        groq_api_key = st.text_input("Groq API Key", type="password")
+        groq_api_key = st.text_input("Groq API Key", type="password", key="groq_api_key")
+        
+        # Connect Button
+        connect_button = st.button("Connect to Database")
     
-    # Auto connect and load when all credentials are filled
-    if all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
+    # Connection Logic
+    if connect_button and all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
         with st.spinner("Connecting to database and loading tables..."):
             # Attempt to connect and load database
-            datalake, table_info = validate_and_connect_database(
+            datalake, table_info, engine = validate_and_connect_database(
                 db_user, db_password, db_host, db_port, db_name, groq_api_key
             )
         
@@ -138,6 +146,8 @@ def main():
             # Store in session state
             st.session_state.datalake = datalake
             st.session_state.table_info = table_info
+            st.session_state.engine = engine
+            st.session_state.database_loaded = True
             
             # Display table information
             st.subheader("📊 Loaded Tables")
@@ -147,7 +157,7 @@ def main():
                     st.write(f"Row Count: {info['row_count']}")
     
     # Chat interface
-    if 'datalake' in st.session_state:
+    if st.session_state.database_loaded:
         st.header("💬 Database Chat")
         
         # Initialize chat history
