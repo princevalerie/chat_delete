@@ -137,31 +137,35 @@ def main():
                 st.markdown(prompt)
             
             # Generate response dari datalake
-            with st.chat_message("assistant", avatar="🤖"):
-                with st.spinner("Generating response..."):
-                    try:
-                        response = st.session_state.datalake.chat(prompt)
-                        # Render response secara langsung
-                        if response is None:
-                            st.warning("Tidak ada response yang dihasilkan.")
-                        elif isinstance(response, (pd.DataFrame, dict, list, int, float, bool)):
-                            st.write(response)
-                        elif isinstance(response, plt.Figure):
-                            st.pyplot(response)
-                        elif isinstance(response, go.Figure):
-                            st.plotly_chart(response)
-                        else:
-                            st.markdown(response)
-                        
-                        st.session_state.messages.append({
-                            "role": "assistant",
-                            "content": response
-                        })
+            with st.spinner("Generating response..."):
+                try:
+                    response = st.session_state.datalake.chat(prompt)
+                    # Render response secara langsung
+                    if response is None:
+                        st.warning("Tidak ada response yang dihasilkan.")
+                    elif isinstance(response, (pd.DataFrame, dict, list, int, float, bool)):
+                        st.write(response)
+                    elif isinstance(response, plt.Figure):
+                        st.pyplot(response)
+                    elif isinstance(response, go.Figure):
+                        st.plotly_chart(response)
+                    else:
+                        st.markdown(response)
                     
-                    except Exception as e:
-                        st.error(f"Error dalam memproses chat: {e}")
-                        import traceback
-                        st.error(traceback.format_exc())
+                    # Jika response berupa plot, simpan sebagai string agar tidak terjadi error ketika menyimpan objek non-string
+                    if isinstance(response, (plt.Figure, go.Figure)):
+                        saved_content = "Plot output saved"
+                    else:
+                        saved_content = response
+            
+                    st.session_state.messages.append({
+                        "role": "assistant",
+                        "content": saved_content
+                    })
+                    
+                except Exception as e:
+                    st.error(f"Error dalam memproses chat: {e}")
+
 
 if __name__ == "__main__":
     main()
