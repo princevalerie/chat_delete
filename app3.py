@@ -84,6 +84,20 @@ def validate_connection_params(config):
     return all(config.values())
 
 
+def display_response(response: Any) -> None:
+    """Display different types of responses appropriately."""
+    if isinstance(response, pd.DataFrame):
+        st.dataframe(response)
+    elif isinstance(response, plt.Figure):
+        st.pyplot(response)
+    elif isinstance(response, go.Figure):
+        st.plotly_chart(response)
+    elif isinstance(response, str):
+        st.write(response)
+    else:
+        st.write("Result:", response)
+
+
 def main():
     # Initialize session state
     if 'connector' not in st.session_state:
@@ -160,20 +174,6 @@ def main():
                     st.error(f"Error initializing AI assistant: {str(e)}")
         else:
             st.warning("No tables found in the database")
-
-
-def display_response(response: Any) -> None:
-    """Display different types of responses appropriately."""
-    if isinstance(response, pd.DataFrame):
-        st.dataframe(response)
-    elif isinstance(response, plt.Figure):
-        st.pyplot(response)
-    elif isinstance(response, go.Figure):
-        st.plotly_chart(response)
-    elif isinstance(response, str):
-        st.write(response)
-    else:
-        st.write("Result:", response)
 
 
 if __name__ == "__main__":
