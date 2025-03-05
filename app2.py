@@ -111,9 +111,6 @@ def handle_pandasai_response(response, response_parser):
         message_entry["text"] = f"Error processing response: {str(e)}"
         st.error(f"Error processing response: {str(e)}")
     
-    # Force Streamlit to update immediately
-    st.experimental_rerun()
-    
     return message_entry
 
 # -----------------------------------------------------------------------------
@@ -218,7 +215,19 @@ def main():
         st.session_state.messages = []
     if 'processing_query' not in st.session_state:
         st.session_state.processing_query = False
-
+    
+    # Function to handle query submission
+    def process_query(prompt):
+        if prompt:
+            # Add user message to history
+            st.session_state.messages.append({
+                "role": "user", 
+                "text": prompt
+            })
+            st.session_state.processing_query = True
+            # Set to rerun the app
+            st.session_state.pending_query = prompt
+    
     # Sidebar for Database Credentials
     with st.sidebar:
         st.header("🔐 Database Credentials")
@@ -300,8 +309,8 @@ def main():
                 if "dataframe" in message and message["dataframe"] is not None:
                     st.dataframe(message["dataframe"])
 
-        # Process any pending query first before accepting a new one
-        if st.session_state.get("pending_query"):
+        # Process any pending query
+        if "pending_query" in st.session_state and st.session_state.pending_query:
             prompt = st.session_state.pending_query
             st.session_state.pending_query = None  # Clear pending query
             
@@ -334,6 +343,7 @@ def main():
                                 message_entry["text"] = str(answer)
                         
                         st.session_state.messages.append(message_entry)
+                        st.session_state.processing_query = False
 
                     except Exception as e:
                         error_msg = f"Error processing chat: {str(e)}"
@@ -342,24 +352,17 @@ def main():
                             "role": "assistant",
                             "text": error_msg
                         })
-            
-            st.experimental_rerun()
+                        st.session_state.processing_query = False
 
         # Chat input
-        if prompt := st.chat_input("Ask a question about your data"):
-            # Add user message to history
-            st.session_state.messages.append({
-                "role": "user", 
-                "text": prompt
-            })
-            
-            # Display user message immediately
-            with st.chat_message("user", avatar="👤"):
-                st.markdown(prompt)
-            
-            # Queue the prompt for processing
-            st.session_state.pending_query = prompt
-            st.experimental_rerun()
+        if not st.session_state.processing_query:
+            prompt = st.chat_input("Ask a question about your data")
+            if prompt:
+                # Display user message immediately
+                with st.chat_message("user", avatar="👤"):
+                    st.markdown(prompt)
+                process_query(prompt)
+                st.rerun()  # Use st.rerun() instead of experimental_rerun
 
 if __name__ == "__main__":
     main()
