@@ -45,8 +45,8 @@ def validate_and_connect_database(credentials):
             try:
                 df = pd.read_sql_query(query, engine)
                 
-                # Create SmartDataframe with proper LLM configuration
-                sdf = SmartDataframe(df, name=f"public.{table}", llm=llm)
+                # Create SmartDataframe without passing LLM here
+                sdf = SmartDataframe(df, name=f"public.{table}")
                 sdf_list.append(sdf)
                 
                 # Store table metadata
@@ -58,7 +58,7 @@ def validate_and_connect_database(credentials):
             except Exception as e:
                 st.warning(f"Failed to load data from public.{table}: {e}")
         
-        # Create SmartDatalake with proper LLM configuration
+        # Create SmartDatalake and pass LLM here
         datalake = SmartDatalake(sdf_list, llm=llm)
         
         return datalake, table_info, engine
