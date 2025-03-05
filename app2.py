@@ -67,7 +67,7 @@ def validate_and_connect_database(credentials):
                         name=f"public.{table}",
                         config={
                             "llm": llm,
-                            "response_parser": StreamlitResponse(st),
+                            "response_parser": StreamlitResponse(context=st),
                             "enable_cache": False
                         }
                     )
@@ -87,7 +87,7 @@ def validate_and_connect_database(credentials):
                 sdf_list,
                 config={
                     "llm": llm,
-                    "response_parser": StreamlitResponse(st),
+                    "response_parser": StreamlitResponse(context=st),
                     "enable_cache": False
                 }
             )
