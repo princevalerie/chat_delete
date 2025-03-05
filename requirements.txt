@@ -1,27 +1,27 @@
 # Core Python Libraries
-pandas>=2.0.0
-numpy>=1.22.0
+pandas
+numpy
 
 # Database and ORM
-sqlalchemy>=2.0.0
-psycopg2-binary>=2.9.6
+sqlalchemy
+psycopg2-binary
 
 # Machine Learning and AI
-pandasai>=2.3.5
-langchain-groq>=0.1.0
-openai>=1.0.0
+pandasai
+langchain-groq
+openai
 
 # Visualization
-matplotlib>=3.7.0
-seaborn>=0.12.0
-plotly>=5.15.0
+matplotlib
+seaborn
+plotly
 
 # Web Framework
-streamlit>=1.25.0
+streamlit
 
 # LLM and NLP
-transformers>=4.30.0
-torch>=2.0.0
+transformers
+torch
 
 # Optional but recommended
-python-dotenv>=1.0.0
+python-dotenv
