@@ -11,13 +11,12 @@ from pandasai import SmartDataframe, SmartDatalake
 from pandasai.responses import ResponseParser
 
 # -----------------------------------------------------------------------------
-# Custom Streamlit Response Parser
+# Custom Streamlit Response Parser (Modifikasi untuk menyembunyikan chart)
 # -----------------------------------------------------------------------------
 class StreamlitResponse(ResponseParser):
     def __init__(self, context):
         super().__init__(context)
-        self.plot_counter = 0
-        self.context = context
+        self.context = context  # Tetap simpan context untuk error handling
 
     def format_dataframe(self, result):
         """Handle dataframe output"""
@@ -27,17 +26,13 @@ class StreamlitResponse(ResponseParser):
             self.context.error(f"Error displaying dataframe: {str(e)}")
 
     def format_plot(self, result):
-        """Handle visualization output"""
+        """Handle visualization output tanpa menampilkan"""
         try:
+            # Membersihkan resource figure matplotlib
             if isinstance(result["value"], plt.Figure):
-                self.context.pyplot(result["value"])
-            elif isinstance(result["value"], str) and os.path.exists(result["value"]):
-                self.plot_counter += 1
-                self.context.image(result["value"], caption=f"Generated Plot {self.plot_counter}")
-            else:
-                self.context.image(result["value"])
+                plt.close(result["value"])
         except Exception as e:
-            self.context.error(f"Error displaying plot: {str(e)}")
+            self.context.error(f"Error processing plot: {str(e)}")
 
     def format_other(self, result):
         """Handle other text-based output"""
@@ -176,11 +171,6 @@ def main():
         if query:
             with st.spinner("Analyzing..."):
                 try:
-                    if os.path.exists("./temp_charts/"):
-                        for file in os.listdir("./temp_charts/"):
-                            if file.endswith(('.png', '.jpg')):
-                                os.remove(os.path.join("./temp_charts/", file))
-                    
                     st.session_state.datalake.chat(query)
                     
                 except Exception as e:
