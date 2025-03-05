@@ -5,12 +5,11 @@ import plotly.graph_objs as go
 from sqlalchemy import create_engine, inspect
 from langchain_groq import ChatGroq
 from pandasai import SmartDataframe, SmartDatalake
-import joblib
 
 def validate_and_connect_database(credentials):
     """Validate database connection and initialize everything"""
     try:
-        # Extract credentials
+        # Ekstrak kredensial
         db_user = credentials["DB_USER"]
         db_password = credentials["DB_PASSWORD"]
         db_host = credentials["DB_HOST"]
@@ -18,26 +17,26 @@ def validate_and_connect_database(credentials):
         db_name = credentials["DB_NAME"]
         groq_api_key = credentials["GROQ_API_KEY"]
         
-        # URL encode special characters in password
+        # Encode password untuk karakter spesial
         encoded_password = db_password.replace('@', '%40')
         
-        # Create database engine
+        # Buat database engine
         engine = create_engine(
             f"postgresql://{db_user}:{encoded_password}@{db_host}:{db_port}/{db_name}"
         )
         
-        # Test connection
+        # Uji koneksi dan inisialisasi komponen
         with engine.connect() as connection:
-            # Initialize LLM
+            # Inisialisasi LLM
             llm = ChatGroq(model_name="Llama3-8b-8192", api_key=groq_api_key)
             
-            # Inspect database
+            # Inspeksi database
             inspector = inspect(engine)
             tables = inspector.get_table_names(schema='public')
             views = inspector.get_view_names(schema='public')
             all_tables_views = tables + views
             
-            # Load tables
+            # Load tabel dan view
             sdf_list = []
             table_info = {}
             
@@ -46,21 +45,21 @@ def validate_and_connect_database(credentials):
                 try:
                     df = pd.read_sql_query(query, engine)
                     
-                    # Create SmartDataframe
+                    # Buat SmartDataframe
                     sdf = SmartDataframe(df, name=f"public.{table}")
                     sdf.config = {"llm": llm}
                     sdf_list.append(sdf)
                     
-                    # Store table metadata
+                    # Simpan metadata tabel
                     table_info[table] = {
                         'columns': list(df.columns),
                         'row_count': len(df)
                     }
                     
                 except Exception as e:
-                    st.warning(f"Failed to load data from public.{table}: {e}")
+                    st.warning(f"Gagal memuat data dari public.{table}: {e}")
             
-            # Create SmartDatalake
+            # Buat SmartDatalake dari list SmartDataframe
             datalake = SmartDatalake(sdf_list, config={"llm": llm})
             
             return datalake, table_info, engine
@@ -69,11 +68,17 @@ def validate_and_connect_database(credentials):
         st.error(f"Database connection error: {e}")
         return None, None, None
 
+# Menggunakan caching bawaan Streamlit untuk menyimpan resource
+@st.cache_resource(show_spinner=False)
+def get_datalake(credentials):
+    datalake, table_info, engine = validate_and_connect_database(credentials)
+    return datalake, table_info
+
 def render_response(response):
-    """Comprehensive response rendering with plot support"""
+    """Fungsi untuk merender response dengan dukungan plot"""
     try:
         if response is None:
-            st.warning("No response generated.")
+            st.warning("Tidak ada response yang dihasilkan.")
             return
 
         if isinstance(response, plt.Figure):
@@ -87,7 +92,7 @@ def render_response(response):
         elif isinstance(response, (list, dict, int, float, bool)):
             st.write(str(response))
         else:
-            st.write("Unhandled response type:", str(response))
+            st.write("Tipe response tidak dikenal:", str(response))
     
     except Exception as e:
         st.error(f"Error rendering response: {e}")
@@ -97,24 +102,20 @@ def main():
     st.set_page_config(page_title="Smart Database Explorer", layout="wide")
     st.title("🔍 Smart Database Explorer")
     
-    # Sidebar for credentials
+    # Sidebar untuk kredensial database
     with st.sidebar:
         st.header("🔐 Database Credentials")
         
-        # Database credentials inputs
         db_user = st.text_input("PostgreSQL Username", key="db_user")
         db_password = st.text_input("PostgreSQL Password", type="password", key="db_password")
         db_host = st.text_input("PostgreSQL Host", value="localhost", key="db_host")
         db_port = st.text_input("PostgreSQL Port", value="5432", key="db_port")
         db_name = st.text_input("Database Name", key="db_name")
-        
-        # Groq API Key
         groq_api_key = st.text_input("Groq API Key", type="password", key="groq_api_key")
         
-        # Connect Button
         connect_button = st.button("Connect to Database")
     
-    # Connection Logic
+    # Logika koneksi database
     if connect_button and all([db_user, db_password, db_host, db_port, db_name, groq_api_key]):
         credentials = {
             "DB_USER": db_user,
@@ -125,68 +126,53 @@ def main():
             "GROQ_API_KEY": groq_api_key
         }
         
-        with st.spinner("Connecting to database and loading tables..."):
-            # Attempt to connect and load database
-            datalake, table_info, engine = validate_and_connect_database(credentials)
+        with st.spinner("Menghubungkan ke database dan memuat tabel..."):
+            datalake, table_info = get_datalake(credentials)
         
         if datalake and table_info:
-            # Save to cache
-            joblib.dump({
-                'datalake': datalake,
-                'table_info': table_info
-            }, 'datalake_cache.joblib')
-            
-            # Store in session state
             st.session_state.datalake = datalake
             st.session_state.table_info = table_info
             st.session_state.database_loaded = True
     
-    # Chat interface
+    # Tampilan antarmuka chat
     if st.session_state.get('database_loaded', False):
         st.header("💬 Database Chat")
         
-        # Initialize chat history
+        # Inisialisasi history chat
         if 'messages' not in st.session_state:
             st.session_state.messages = []
         
-        # Display table information
+        # Tampilkan informasi tabel yang telah dimuat
         st.subheader("📊 Loaded Tables")
         for table, info in st.session_state.table_info.items():
             with st.expander(table):
                 st.write(f"Columns: {', '.join(info['columns'])}")
                 st.write(f"Row Count: {info['row_count']}")
         
-        # Display chat messages
+        # Tampilkan history chat
         for message in st.session_state.messages:
-            with st.chat_message(message["role"], avatar="🤖" if message["role"]=="assistant" else "👤"):
+            with st.chat_message(message["role"], avatar="🤖" if message["role"] == "assistant" else "👤"):
                 st.markdown(message["content"])
         
-        # Chat input
+        # Input chat
         if prompt := st.chat_input("Ask a question about your data"):
-            # Add user message to chat history
             st.session_state.messages.append({"role": "user", "content": prompt})
-            
-            # Display user message
             with st.chat_message("user", avatar="👤"):
                 st.markdown(prompt)
             
-            # Generate response
+            # Generate response dari datalake
             with st.chat_message("assistant", avatar="🤖"):
                 with st.spinner("Generating response..."):
                     try:
                         response = st.session_state.datalake.chat(prompt)
-                        
-                        # Render and display response
                         render_response(response)
-                        
-                        # Add to chat history
                         st.session_state.messages.append({
-                            "role": "assistant", 
+                            "role": "assistant",
                             "content": str(response)
                         })
                     
                     except Exception as e:
-                        st.error(f"Detailed error in chat processing: {e}")
+                        st.error(f"Error dalam memproses chat: {e}")
                         import traceback
                         st.error(traceback.format_exc())
 
