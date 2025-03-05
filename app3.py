@@ -7,9 +7,31 @@ import plotly.graph_objs as go
 from sqlalchemy import create_engine, inspect
 from langchain_groq import ChatGroq
 from pandasai import SmartDataframe, SmartDatalake
+from pandasai.responses.response_parser import ResponseParser
+
+# Custom ResponseParser untuk Streamlit
+class StreamlitResponse(ResponseParser):
+    def __init__(self, context):
+        super().__init__(context)
+    
+    def format_dataframe(self, result):
+        st.dataframe(result["value"])
+    
+    def format_plot(self, result):
+        # Render plot berdasarkan tipe objek
+        if isinstance(result["value"], plt.Figure):
+            st.pyplot(result["value"])
+        elif isinstance(result["value"], go.Figure):
+            st.plotly_chart(result["value"])
+        elif isinstance(result["value"], str) and result["value"].endswith(".png") and os.path.exists(result["value"]):
+            image = Image.open(result["value"])
+            st.image(image)
+    
+    def format_other(self, result):
+        st.markdown(result["value"])
 
 def validate_and_connect_database(credentials):
-    """Validate database connection and initialize everything"""
+    """Validasi koneksi database dan inisialisasi komponen-komponen utama"""
     try:
         # Ekstrak kredensial
         db_user = credentials["DB_USER"]
@@ -47,9 +69,9 @@ def validate_and_connect_database(credentials):
                 try:
                     df = pd.read_sql_query(query, engine)
                     
-                    # Buat SmartDataframe
+                    # Buat SmartDataframe dengan konfigurasi LLM dan ResponseParser
                     sdf = SmartDataframe(df, name=f"public.{table}")
-                    sdf.config = {"llm": llm}
+                    sdf.config = {"llm": llm, "response_parser": StreamlitResponse(st)}
                     sdf_list.append(sdf)
                     
                     # Simpan metadata tabel
@@ -61,8 +83,8 @@ def validate_and_connect_database(credentials):
                 except Exception as e:
                     st.warning(f"Gagal memuat data dari public.{table}: {e}")
             
-            # Buat SmartDatalake dari list SmartDataframe
-            datalake = SmartDatalake(sdf_list, config={"llm": llm})
+            # Buat SmartDatalake dari list SmartDataframe dengan ResponseParser
+            datalake = SmartDatalake(sdf_list, config={"llm": llm, "response_parser": StreamlitResponse(st)})
             
             return datalake, table_info, engine
     
@@ -70,7 +92,7 @@ def validate_and_connect_database(credentials):
         st.error(f"Database connection error: {e}")
         return None, None, None
 
-# Menggunakan caching bawaan Streamlit untuk menyimpan resource
+# Gunakan caching bawaan Streamlit untuk menyimpan resource
 @st.cache_resource(show_spinner=False)
 def get_datalake(credentials):
     datalake, table_info, engine = validate_and_connect_database(credentials)
@@ -138,38 +160,15 @@ def main():
             with st.chat_message("user", avatar="👤"):
                 st.markdown(prompt)
             
-            # Generate response dari datalake
+            # Generate response dari datalake; output akan langsung dirender oleh StreamlitResponse
             with st.spinner("Generating response..."):
                 try:
-                    response = st.session_state.datalake.chat(prompt)
+                    st.session_state.datalake.chat(prompt)
                     
-                    # Render response secara langsung
-                    if response is None:
-                        st.warning("Tidak ada response yang dihasilkan.")
-                    elif isinstance(response, (pd.DataFrame, dict, list, int, float, bool)):
-                        st.write(response)
-                    elif isinstance(response, plt.Figure):
-                        st.pyplot(response)
-                    elif isinstance(response, go.Figure):
-                        st.plotly_chart(response)
-                    # Jika response berupa path file gambar (.png) dan file tersebut ada, tampilkan gambarnya
-                    elif isinstance(response, str) and response.endswith(".png") and os.path.exists(response):
-                        image = Image.open(response)
-                        st.image(image)
-                    else:
-                        st.markdown(response)
-                    
-                    # Logika penyimpanan response:
-                    # Jika response berupa plot atau path gambar, simpan sebagai string agar tidak terjadi error ketika menyimpan objek non-string
-                    if (isinstance(response, (plt.Figure, go.Figure)) or
-                        (isinstance(response, str) and response.endswith(".png") and os.path.exists(response))):
-                        saved_content = "Plot output saved"
-                    else:
-                        saved_content = response
-            
+                    # Tambahkan log history untuk respons (output sudah dirender di tampilan)
                     st.session_state.messages.append({
                         "role": "assistant",
-                        "content": saved_content
+                        "content": "Output telah dirender pada tampilan."
                     })
                     
                 except Exception as e:
