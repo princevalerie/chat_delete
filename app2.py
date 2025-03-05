@@ -7,7 +7,6 @@ import streamlit as st
 import pandas as pd
 import sqlalchemy
 from sqlalchemy import create_engine, inspect
-from sqlalchemy.exc import PermissionError, SQLAlchemyError
 from langchain_groq import ChatGroq
 from pandasai import SmartDataframe, SmartDatalake
 from pandasai.llm import OpenAI
@@ -44,11 +43,11 @@ class StreamlitResponse(ResponseParser):
 def handle_pandasai_response(response, response_parser):
     """
     Comprehensive handler for PandasAI responses
-    
+
     Args:
         response: Raw response from PandasAI
         response_parser: Custom Streamlit response parser
-    
+
     Returns:
         dict: Parsed message entry with different response types
     """
@@ -112,75 +111,57 @@ def handle_pandasai_response(response, response_parser):
 # Fungsi validasi koneksi database dan pemuatan tabel
 # -----------------------------------------------------------------------------
 def validate_and_connect_database(credentials):
-    try:
-        # Ekstrak kredensial
-        db_user = credentials["DB_USER"]
-        db_password = credentials["DB_PASSWORD"]
-        db_host = credentials["DB_HOST"]
-        db_port = credentials["DB_PORT"]
-        db_name = credentials["DB_NAME"]
-        groq_api_key = credentials["GROQ_API_KEY"]
+    # Ekstrak kredensial
+    db_user = credentials["DB_USER"]
+    db_password = credentials["DB_PASSWORD"]
+    db_host = credentials["DB_HOST"]
+    db_port = credentials["DB_PORT"]
+    db_name = credentials["DB_NAME"]
+    groq_api_key = credentials["GROQ_API_KEY"]
 
-        # Encode password untuk karakter spesial
-        encoded_password = db_password.replace('@', '%40')
+    # Encode password untuk karakter spesial
+    encoded_password = db_password.replace('@', '%40')
 
-        # Buat database engine
-        engine = create_engine(
-            f"postgresql://{db_user}:{encoded_password}@{db_host}:{db_port}/{db_name}"
-        )
+    # Buat database engine
+    engine = create_engine(
+        f"postgresql://{db_user}:{encoded_password}@{db_host}:{db_port}/{db_name}"
+    )
 
-        with engine.connect() as connection:
-            # Inisialisasi LLM
-            llm = ChatGroq(model_name="llama-3.3-70b-versatile", api_key=groq_api_key)
+    with engine.connect() as connection:
+        # Inisialisasi LLM
+        llm = ChatGroq(model_name="llama-3.3-70b-versatile", api_key=groq_api_key)
 
-            # Inspeksi database
-            inspector = inspect(engine)
-            tables = inspector.get_table_names(schema="public")
-            views = inspector.get_view_names(schema="public")
-            all_tables_views = tables + views
+        # Inspeksi database
+        inspector = inspect(engine)
+        tables = inspector.get_table_names(schema="public")
+        views = inspector.get_view_names(schema="public")
+        all_tables_views = tables + views
 
-            sdf_list = []
-            table_info = {}
-            permission_errors = []
+        sdf_list = []
+        table_info = {}
 
-            for table in all_tables_views:
-                try:
-                    # Coba mendapatkan sample data dengan batasan
-                    query = f'SELECT * FROM "public"."{table}" LIMIT 10'
-                    df = pd.read_sql_query(query, engine)
-                    
-                    # Buat SmartDataframe dengan konfigurasi LLM dan ResponseParser
-                    response_parser = StreamlitResponse(st)
-                    sdf = SmartDataframe(df, name=f"public.{table}", 
-                                          config={"llm": llm, "response_parser": response_parser})
-                    sdf_list.append(sdf)
-                    
-                    # Simpan metadata tabel
-                    table_info[table] = {
-                        "columns": list(df.columns),
-                        "row_count": len(df),
-                        "sample_loaded": True
-                    }
-                except sqlalchemy.exc.SQLAlchemyError as e:
-                    permission_errors.append({
-                        "table": table,
-                        "error": str(e)
-                    })
-                    table_info[table] = {
-                        "columns": [],
-                        "row_count": 0,
-                        "sample_loaded": False,
-                        "error": str(e)
-                    }
-
-            # Buat SmartDatalake dari list SmartDataframe
-            datalake = SmartDatalake(sdf_list, config={"llm": llm, "response_parser": StreamlitResponse})
+        for table in all_tables_views:
+            # Coba mendapatkan sample data dengan batasan
+            query = f'SELECT * FROM "public"."{table}" LIMIT 10'
+            df = pd.read_sql_query(query, engine)
             
-            return datalake, table_info, engine, permission_errors
+            # Buat SmartDataframe dengan konfigurasi LLM dan ResponseParser
+            response_parser = StreamlitResponse(st)
+            sdf = SmartDataframe(df, name=f"public.{table}", 
+                                   config={"llm": llm, "response_parser": response_parser})
+            sdf_list.append(sdf)
+            
+            # Simpan metadata tabel
+            table_info[table] = {
+                "columns": list(df.columns),
+                "row_count": len(df),
+                "sample_loaded": True
+            }
 
-    except Exception as e:
-        st.error(f"Database connection error: {e}")
-        return None, None, None, []
+        # Buat SmartDatalake dari list SmartDataframe
+        datalake = SmartDatalake(sdf_list, config={"llm": llm, "response_parser": StreamlitResponse})
+        
+        return datalake, table_info, engine, []
 
 # -----------------------------------------------------------------------------
 # Tampilan Utama dan Logika Chat Database
@@ -223,13 +204,13 @@ def main():
             else:
                 st.warning("No tables could be loaded.")
             
-            # Tambahkan expander untuk tabel dengan permission error
+            # Tambahkan expander untuk tabel dengan access issues (jika ada)
             st.subheader("Tables with Access Issues")
             failed_tables = [table for table, info in st.session_state.table_info.items() if not info['sample_loaded']]
             if failed_tables:
                 for table in failed_tables:
                     with st.expander(f"❌ {table}"):
-                        st.error(st.session_state.table_info[table]['error'])
+                        st.error(st.session_state.table_info[table].get('error', 'No error info'))
             else:
                 st.success("All tables loaded successfully!")
 
@@ -247,18 +228,14 @@ def main():
             "GROQ_API_KEY": groq_api_key
         }
         with st.spinner("Menghubungkan ke database dan memuat tabel..."):
-            datalake, table_info, engine, permission_errors = validate_and_connect_database(credentials)
+            datalake, table_info, engine, _ = validate_and_connect_database(credentials)
 
         if datalake and table_info:
             st.session_state.datalake = datalake
             st.session_state.table_info = table_info
             st.session_state.database_loaded = True
             
-            # Berikan feedback tentang koneksi
-            if permission_errors:
-                st.warning(f"Database connected with {len(permission_errors)} table access issues.")
-            else:
-                st.success("Database connected successfully!")
+            st.success("Database connected successfully!")
 
     # Chat interface
     if st.session_state.get("database_loaded", False):
@@ -268,7 +245,6 @@ def main():
         for message in st.session_state.messages:
             with st.chat_message(message["role"], 
                                  avatar="🤖" if message["role"] == "assistant" else "👤"):
-                # Tangani berbagai jenis output
                 if "image" in message:
                     st.image(message["image"])
                 if "text" in message:
@@ -278,35 +254,27 @@ def main():
 
         # Input chat
         if prompt := st.chat_input("Ask a question about your data"):
-            # Tambahkan pesan pengguna
             st.session_state.messages.append({
                 "role": "user", 
                 "text": prompt
             })
 
-            # Tampilkan pesan pengguna
             with st.chat_message("user", avatar="👤"):
                 st.markdown(prompt)
 
-            # Siapkan response parser khusus
             response_parser = StreamlitResponse(st)
 
-            # Proses chat dengan datalake
             with st.chat_message("assistant", avatar="🤖"):
                 with st.spinner("Generating response..."):
                     try:
-                        # Reset response parser
                         response_parser.image_response = None
                         response_parser.text_response = None
                         response_parser.dataframe_response = None
 
-                        # Jalankan chat dan dapatkan respons
                         answer = st.session_state.datalake.chat(prompt)
 
-                        # Tangani respons menggunakan fungsi khusus
                         message_entry = handle_pandasai_response(answer, response_parser)
                         
-                        # Tambahkan ke riwayat pesan
                         st.session_state.messages.append(message_entry)
 
                     except Exception as e:
