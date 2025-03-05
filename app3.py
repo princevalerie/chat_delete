@@ -103,7 +103,7 @@ def main():
                 "host": st.text_input("Host", "localhost"),
                 "port": st.number_input("Port", value=3306),
                 "database": st.text_input("Database"),
-                "user": st.text_input("Username"),  # Tetap menggunakan "user" untuk MySQL
+                "user": st.text_input("Username"),  # Perbaikan: "user" bukan "username"
                 "password": st.text_input("Password", type="password")
             }
         else:
@@ -111,9 +111,8 @@ def main():
                 "host": st.text_input("Host", "localhost"),
                 "port": st.number_input("Port", value=5432),
                 "database": st.text_input("Database"),
-                "username": st.text_input("Username"),  # Perbaikan: "username" untuk PostgreSQL
-                "password": st.text_input("Password", type="password"),
-                "table": st.text_input("Table")  # Tambahkan parameter "table"
+                "user": st.text_input("Username"),  # Perbaikan: "user" bukan "username"
+                "password": st.text_input("Password", type="password")
             }
 
         if st.button("Connect"):
