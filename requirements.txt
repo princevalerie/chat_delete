@@ -1,6 +1,7 @@
 # Core Python Libraries
 pandas
 numpy
+joblib
 
 # Database and ORM
 sqlalchemy
