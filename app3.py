@@ -10,20 +10,8 @@ import plotly.graph_objs as go
 from sqlalchemy import create_engine, inspect
 from langchain_groq import ChatGroq
 from pandasai import SmartDataframe, SmartDatalake
-from pandasai.callbacks import BaseCallback
 from pandasai.llm import OpenAI
 from pandasai.responses.response_parser import ResponseParser
-
-# -----------------------------------------------------------------------------
-# Custom Callback untuk Streamlit
-# -----------------------------------------------------------------------------
-class StreamlitCallback(BaseCallback):
-    def __init__(self, container) -> None:
-        """Initialize callback handler."""
-        self.container = container
-
-    def on_code(self, response: str):
-        self.container.code(response)
 
 # -----------------------------------------------------------------------------
 # Custom Response Parser untuk Streamlit
@@ -82,13 +70,9 @@ def validate_and_connect_database(credentials):
                 query = f'SELECT * FROM "public"."{table}"'
                 try:
                     df = pd.read_sql_query(query, engine)
-                    # Buat SmartDataframe dengan konfigurasi LLM, ResponseParser, dan Callback
+                    # Buat SmartDataframe dengan konfigurasi LLM dan ResponseParser
                     sdf = SmartDataframe(df, name=f"public.{table}")
-                    sdf.config = {
-                        "llm": llm,
-                        "response_parser": StreamlitResponse(st),
-                        "callback": StreamlitCallback(st.container())
-                    }
+                    sdf.config = {"llm": llm, "response_parser": StreamlitResponse(st)}
                     sdf_list.append(sdf)
                     # Simpan metadata tabel
                     table_info[table] = {
@@ -99,11 +83,7 @@ def validate_and_connect_database(credentials):
                     st.warning(f"Gagal memuat data dari public.{table}: {e}")
 
             # Buat SmartDatalake dari list SmartDataframe
-            datalake = SmartDatalake(sdf_list, config={
-                "llm": llm,
-                "response_parser": StreamlitResponse(st),
-                "callback": StreamlitCallback(st.container())
-            })
+            datalake = SmartDatalake(sdf_list, config={"llm": llm, "response_parser": StreamlitResponse(st)})
             return datalake, table_info, engine
 
     except Exception as e:
@@ -187,9 +167,9 @@ def main():
                 st.markdown(prompt)
             with st.spinner("Generating response..."):
                 try:
-                    # Hasil chat akan di-render langsung oleh StreamlitResponse dan callback
+                    # Hasil chat akan di-render langsung oleh StreamlitResponse
                     answer = st.session_state.datalake.chat(prompt)
-                    # Jika answer berupa string, Anda bisa menyimpannya ke history (opsional)
+                    # Jika answer berupa string, Anda dapat menyimpannya ke history (opsional)
                     if answer:
                         st.session_state.messages.append({"role": "assistant", "content": answer})
                 except Exception as e:
