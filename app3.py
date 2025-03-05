@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from typing import List, Optional, Union, Any
-from pandasai.connectors import MySQLConnector, PostgreSQLConnector
+from pandasai.connectors import PostgreSQLConnector
 from pandasai import SmartDataframe
 from langchain_community.llms import Ollama
 
@@ -17,15 +17,7 @@ def fetch_tables(connector):
     Fetch list of tables from the database.
     """
     try:
-        if isinstance(connector, MySQLConnector):
-            # For MySQL
-            query = "SHOW TABLES"
-            tables_df = connector.query(query)
-            if tables_df.empty:
-                return []
-            return tables_df.iloc[:, 0].tolist()
-
-        elif isinstance(connector, PostgreSQLConnector):
+        if isinstance(connector, PostgreSQLConnector):
             # For PostgreSQL
             schema_query = """
                 SELECT schema_name 
@@ -56,7 +48,6 @@ def fetch_tables(connector):
         st.error(f"Error fetching tables: {e}")
         return []
 
-
 def load_table_data(connector, table_name):
     """
     Load data from a specific table.
@@ -69,8 +60,6 @@ def load_table_data(connector, table_name):
                 query = f'SELECT * FROM "{schema}"."{table}"'
             else:
                 query = f'SELECT * FROM "{table_name}"'
-        else:
-            query = f"SELECT * FROM {table_name}"
 
         df = connector.query(query)
         return df  # Return directly as it's already a DataFrame
@@ -79,10 +68,8 @@ def load_table_data(connector, table_name):
         st.error(f"Error loading table data: {e}")
         return pd.DataFrame()
 
-
 def validate_connection_params(config):
     return all(config.values())
-
 
 def display_response(response: Any) -> None:
     """Display different types of responses appropriately."""
@@ -97,7 +84,6 @@ def display_response(response: Any) -> None:
     else:
         st.write("Result:", response)
 
-
 def main():
     # Initialize session state
     if 'connector' not in st.session_state:
@@ -108,33 +94,22 @@ def main():
     # Sidebar configuration
     with st.sidebar:
         st.title("Database Configuration")
-        db_type = st.radio("Select Database", ["MySQL", "PostgreSQL"])
-        
+        db_type = "PostgreSQL"  # Only PostgreSQL
+
         # Connection parameters
-        config = {}
-        if db_type == "MySQL":
-            config = {
-                "host": st.text_input("Host", "localhost"),
-                "port": st.number_input("Port", value=3306),
-                "database": st.text_input("Database"),
-                "user": st.text_input("Username"),  # Corrected: "user" instead of "username"
-                "password": st.text_input("Password", type="password")
-            }
-        else:
-            config = {
-                "host": st.text_input("Host", "localhost"),
-                "port": st.number_input("Port", value=5432),
-                "database": st.text_input("Database"),
-                "username": st.text_input("Username"),  # Corrected: "username" instead of "user"
-                "password": st.text_input("Password", type="password")
-            }
+        config = {
+            "host": st.text_input("Host", "localhost"),
+            "port": st.number_input("Port", value=5432),
+            "database": st.text_input("Database"),
+            "username": st.text_input("Username"),  # Corrected: "username" instead of "user"
+            "password": st.text_input("Password", type="password")
+        }
 
         if st.button("Connect"):
             if validate_connection_params(config):
                 with st.spinner("Connecting to database..."):
                     try:
-                        connector_class = MySQLConnector if db_type == "MySQL" else PostgreSQLConnector
-                        st.session_state.connector = connector_class(config=config)
+                        st.session_state.connector = PostgreSQLConnector(config=config)
                         st.success("Connected successfully!")
                     except Exception as e:
                         st.error(f"Connection failed: {str(e)}")
@@ -144,21 +119,21 @@ def main():
     # Main content
     if st.session_state.connector:
         tables = fetch_tables(st.session_state.connector)
-        
+
         if tables:
             selected_table = st.selectbox("Select Table", tables)
-            
+
             if selected_table:
                 with st.spinner("Loading table data..."):
                     df = load_table_data(st.session_state.connector, selected_table)
                     st.dataframe(df)
-                
+
                 # AI Assistant
                 st.header("🤖 AI Database Assistant")
                 try:
                     llm = Ollama(model="mistral")
                     df_connector = SmartDataframe(st.session_state.connector, config={"llm": llm})
-                    
+
                     prompt = st.text_input("Ask a question about your data:")
                     if st.button("Generate"):
                         if prompt:
@@ -174,7 +149,6 @@ def main():
                     st.error(f"Error initializing AI assistant: {str(e)}")
         else:
             st.warning("No tables found in the database")
-
 
 if __name__ == "__main__":
     main()
